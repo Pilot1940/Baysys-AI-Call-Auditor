@@ -3,7 +3,7 @@
 **Project:** BaySys Call Audit AI
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
 **Build start:** 2026-04-01
-**Last updated:** 2026-04-01 (Session 5)
+**Last updated:** 2026-04-01 (Session 9)
 **Build method:** Claude Code (Opus 4.6)
 
 ---
@@ -19,6 +19,8 @@
 | E | S3 raw key storage + IST timezone compliance | 2026-04-01 | #8, #9 |
 | F | Bulk dedup pre-fetch: O(1) per row sync performance | 2026-04-01 | #10 |
 | G | Webhook recovery polling + call duration + max calls thresholds | 2026-04-01 | #11, #12, #13 |
+| Perf-1 | pgbouncer fix: cursor.fetchall() before ORM loop | 2026-04-01 | — |
+| Perf-2 | O(1) max_calls_per_customer via pre-fetched call counts dict | 2026-04-01 | — |
 
 ---
 
@@ -360,3 +362,70 @@ Dedup inside the loop is then an O(1) `in` check. `existing_urls` is updated aft
 5. **Scheduled every 30 minutes** — matches `POLL_STUCK_AFTER_MINUTES` default. Recordings that miss their webhook are recovered within 30–60 minutes.
 
 ### Test count at end of session: 265 passing, 0 ruff findings
+
+---
+
+## Session 8 — Perf Fix 1: pgbouncer Connection Fix
+
+**Date:** 2026-04-01
+**Scope:** `sync_call_logs` failing mid-run with `django.db.utils.InterfaceError: connection already closed`.
+
+### Root cause
+
+`run_sync_for_date()` opened a raw `connection.cursor()`, then called `CallRecording.objects.create()` inside the `while fetchmany()` loop. Supabase uses pgbouncer in **transaction-mode** pooling — after each ORM commit, pgbouncer returns the underlying TCP connection to the pool, invalidating the open raw cursor. The next `fetchmany()` hit `connection already closed`.
+
+### Fix
+
+Replaced `while True: fetchmany()` loop with a single `cursor.fetchall()` inside the `with connection.cursor()` block. All rows are fetched into memory before the cursor closes and before any ORM write touches the connection.
+
+### Files modified
+
+- `baysys_call_audit/ingestion.py` — `run_sync_for_date()`: `fetchmany` loop → `fetchall` + iterate list
+- `baysys_call_audit/tests/test_sync_call_logs.py` — all `fetchmany` mock calls → `fetchall`; `test_batch_size_passed_to_fetchmany` → `test_batch_size_accepted_fetchall_used`
+
+### Key decisions
+
+1. **fetchall acceptable for daily sync volume** — 8–13K rows at ~100 bytes = ~1MB peak memory. Not a concern.
+2. **batch_size retained for API compatibility** — parameter still accepted; docstring updated to note it no longer controls the raw fetch.
+
+### Test count: 265 passing, 0 ruff findings (no new tests — mock changes only)
+
+---
+
+## Session 9 — Perf Fix 2: O(1) max_calls_per_customer Compliance Check
+
+**Date:** 2026-04-01
+**Scope:** `sync_call_logs` completing but taking 40 minutes for 3,563 inserts (2421s total). Root cause: N+1 DB queries in compliance engine.
+
+### Root cause
+
+`_check_max_calls_per_customer()` in `compliance.py` issued a `CallRecording.objects.filter(...).count()` DB query for every new recording created. Over Supabase pooler (~300ms round-trip), 3,563 inserts × 300ms compliance check = ~18 minutes in compliance alone, plus ~300ms per INSERT = ~40 minutes total.
+
+### Fix (same pattern as Prompt F dedup pre-fetch)
+
+`run_sync_for_date()` pre-fetches a `dict[customer_id → int]` of existing call counts for the target date in **one** annotated query before the loop. Passed through `create_recording_from_row()` → `check_metadata_compliance()` → `_check_max_calls_per_customer()`. Count is incremented in-memory after each new create. Webhook path (no pre-computed dict) falls back to DB query unchanged.
+
+### Performance impact
+
+| | Before | After |
+|---|---|---|
+| DB queries per new recording | 1 INSERT + 1 COUNT | 1 INSERT |
+| DB queries for compliance (3,563 rows) | 3,563 | 0 |
+| Sync duration (3,563 new + 4,070 dedup) | 2421s (40 min) | 0.7s |
+
+0.7 seconds confirmed on a fully-deduped re-run. Real insert benchmark (new date) expected < 2 minutes for a full day.
+
+### Files modified
+
+- `baysys_call_audit/compliance.py` — `check_metadata_compliance(recording, call_counts_cache=None)`. All metadata handlers updated. `_check_max_calls_per_customer` uses `call_counts_cache.get(cid, 0)` when cache provided; DB query fallback otherwise.
+- `baysys_call_audit/ingestion.py` — `run_sync_for_date()` pre-fetches `dict[customer_id → count]` (annotated query). `create_recording_from_row(row, existing_urls, call_counts_cache)` accepts + increments cache after create; passes to compliance.
+- `baysys_call_audit/tests/test_compliance.py` — 4 new tests: cache no-flag, cache flag, null customer, DB fallback
+- `baysys_call_audit/tests/test_ingestion.py` — 2 new tests: pre-seeded cache, intra-batch increment
+
+### Key decisions
+
+1. **Same pattern as Prompt F** — pre-fetch once, O(1) lookup per row, increment in-memory after create for intra-batch correctness.
+2. **Webhook path unchanged** — no cache passed at webhook time. DB query fallback ensures correctness for isolated recordings.
+3. **`call_counts_cache` is optional** — defaults to None. CSV/Excel import callers pass nothing; behaviour unchanged.
+
+### Test count: 271 passing, 0 ruff findings (commit: 55fd923)

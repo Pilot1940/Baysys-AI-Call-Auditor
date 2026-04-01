@@ -56,7 +56,7 @@ All interaction with the speech analytics provider goes through `speech_provider
 ### 2. `crm_adapter.py` is the single mock/prod seam
 Same pattern as Trainer. `AUDIT_AUTH_BACKEND=mock` in dev, `=crm` in prod. All CRM imports inside function bodies only with `# noqa: PLC0415`.
 
-### 3. Test gate: 265 tests passing, 0 ruff findings
+### 3. Test gate: 271 tests passing, 0 ruff findings
 Before any commit or review:
 ```bash
 python manage.py test --settings=settings_test -v 0   # must pass
@@ -88,7 +88,7 @@ Every session that modifies code MUST update MANIFEST.md, BUILD_LOG.md, and docs
 
 ## Current state (as of 2026-04-01)
 
-- **265 tests passing, 0 ruff findings**
+- **271 tests passing, 0 ruff findings**
 - 5 Django models: CallRecording, CallTranscript, ProviderScore, ComplianceFlag, OwnLLMScore
 - Migrations 0001–0004 applied
 - **PC-Supabase fully configured:** `uvarcl_live.call_logs` (500K rows), `uvarcl_live.users` (662 rows, anonymised), `baysys_call_audit.*` all 5 tables created. Sync can be run end-to-end with no RDS connection needed.
