@@ -2,13 +2,13 @@
 
 ## System Overview
 
-BaySys Call Audit AI is a call monitoring system that processes recorded MP3 calls from UVARCL's debt-collection operation. It transcribes audio via a Speech Analytics Provider (currently GreyLabs), scores calls against configurable templates, and flags RBI Code of Conduct compliance violations. The system handles ~18K recordings/day plus ~5K/day backfill from a 200K historical archive.
+BaySys Call Audit AI is a call monitoring system that processes recorded MP3 calls from Baysys.ai's debt collection process (on behalf of UVARCL). It transcribes audio via a Speech Analytics Provider (currently GreyLabs), scores calls against configurable templates, and flags RBI Code of Conduct compliance violations. The system handles ~18K recordings/day plus ~5K/day backfill from a 200K historical archive.
 
 ---
 
-## Dev Supabase Instance (Pre-populated)
+## PC's Supabase (Pre-populated Dev Instance)
 
-A dev Supabase instance is pre-configured for development and testing — no cross-DB connections to source RDS required.
+PC's Supabase is the shared dev instance for all BaySys projects — pre-configured for development and testing with no cross-DB connections to source RDS required.
 
 **Instance:** Same Supabase project as Voice Trainer (`DATABASE_URL` in `.env`)
 
@@ -30,7 +30,7 @@ A dev Supabase instance is pre-configured for development and testing — no cro
 - 276 distinct agents, 43,043 distinct customers in `call_recordings`
 - `recording_s3_path` format: raw S3 object key e.g. `Rezolution/call_recordings/2026/03/31/call.mp3` — no http:// prefix. This is expected.
 
-**To test sync against dev Supabase:**
+**To test sync against PC's Supabase:**
 ```bash
 # Sync a date that exists in the loaded call_logs data
 python manage.py sync_call_logs --date 2026-03-31 --dry-run
@@ -273,7 +273,32 @@ ORDER BY severity, flag_type;
 
 ### Recordings stuck in "submitted" status
 - Provider may still be processing (async). Check provider dashboard.
-- If stuck for >1 hour, try polling with `speech_provider.get_results(resource_id)`.
+- The `poll_stuck_recordings` cron job (job 5) runs every 30 minutes and automatically recovers these. Check `/var/log/baysys_audit/poll.log` for recovery counts.
+- To trigger recovery immediately: `python manage.py poll_stuck_recordings`
+- To check how many are stuck: `python manage.py poll_stuck_recordings --dry-run`
+
+### Webhook Recovery
+
+If the provider cannot deliver webhooks (server unreachable, retry exhausted), recordings stay in `status=submitted` indefinitely. The `poll_stuck_recordings` command is the recovery mechanism:
+
+```bash
+# See how many are stuck (no API calls made)
+python manage.py poll_stuck_recordings --dry-run
+
+# Recover up to 50 at a time (default)
+python manage.py poll_stuck_recordings
+
+# Recover a large backlog
+python manage.py poll_stuck_recordings --batch-size 500
+```
+
+**How it works:**
+1. Finds recordings with `status=submitted`, `submitted_at < now - POLL_STUCK_AFTER_MINUTES`, `provider_resource_id IS NOT NULL`
+2. Calls `get_results()` for each → if transcript is present, calls `process_provider_webhook()` (same logic as live webhook delivery)
+3. If transcript is absent → "still processing", leave as `submitted`
+4. On `ProviderError` → increments `retry_count`, leaves as `submitted`
+
+**Threshold:** `POLL_STUCK_AFTER_MINUTES` (default 30). Set lower (e.g. 15) for faster recovery in high-volume environments.
 
 ### Failed recordings
 ```sql
@@ -308,10 +333,15 @@ All cron jobs run from the project root with the virtualenv activated. Replace `
 # 4. Off-peak tier: submit backfill / archival recordings overnight
 #    Runs once at 2am
 0 2 * * * cd /path/to/project && .venv/bin/python manage.py submit_recordings --tier off_peak --batch-size 5000 >> /var/log/baysys_audit/submit.log 2>&1
+
+# 5. Poll for stuck recordings — webhook fallback recovery
+#    Runs every 30 minutes
+*/30 * * * * cd /path/to/project && .venv/bin/python manage.py poll_stuck_recordings >> /var/log/baysys_audit/poll.log 2>&1
 ```
 
 **Notes:**
 - The sync command (job 1) and submission commands (jobs 2–4) are independent. Sync populates `call_recordings` with `status=pending`; submission picks up pending rows and sends them to the provider.
+- Job 5 (`poll_stuck_recordings`) is a safety net — it recovers recordings whose webhook delivery was missed. Under normal conditions most recordings are processed via webhook; polling handles the remainder.
 - If cron misses, use the failsafe API endpoint: `POST /audit/recordings/sync/` (Admin/Supervisor only).
 - Rate limit: 200 requests/min to provider. At that rate, 18K daily recordings clear in ~90 minutes.
 - Log rotation for `/var/log/baysys_audit/` recommended — same as Voice Trainer setup.
@@ -335,8 +365,10 @@ All cron jobs run from the project root with the virtualenv activated. Replace `
 | `SPEECH_PROVIDER_RATE_LIMIT` | No | 200 | Max requests/min to provider |
 | `COMPLIANCE_CALL_WINDOW_START_HOUR` | No | 8 | Earliest permitted call hour |
 | `COMPLIANCE_CALL_WINDOW_END_HOUR` | No | 20 | Latest permitted call hour |
-| `COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY` | No | 3 | Max calls to same customer per day |
+| `COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY` | No | 15 | Max calls to same customer per day before compliance flag |
 | `COMPLIANCE_FATAL_THRESHOLD` | No | 3 | Fatal level threshold for compliance flag |
+| `SYNC_MIN_CALL_DURATION` | No | 20 | Minimum call duration (seconds) to sync; shorter calls excluded |
+| `POLL_STUCK_AFTER_MINUTES` | No | 30 | Minutes after submission before polling for missed webhooks |
 
 ---
 

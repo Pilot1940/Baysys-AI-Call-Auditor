@@ -272,3 +272,13 @@ class SyncQueryCallStartTimeTests(TestCase):
         row_dict["agent_name"] = "Test Agent"
         mapped = map_sync_row(row_dict)
         self.assertEqual(mapped["recording_datetime"], dt)
+
+
+class SyncQueryMinDurationTests(TestCase):
+    def test_sync_query_has_two_params(self):
+        # SYNC_QUERY must use %s for both target_date and min_duration — no hardcoded values
+        self.assertEqual(SYNC_QUERY.count("%s"), 2)
+
+    def test_sync_query_no_hardcoded_duration(self):
+        self.assertNotIn("> 10", SYNC_QUERY)
+        self.assertNotIn("> 20", SYNC_QUERY)

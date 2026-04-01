@@ -1,8 +1,8 @@
 # BaySys Call Audit AI — Code Repository Manifest
 
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
-**Last updated:** Session 6 (Prompt F)
-**Test count:** 249 passing
+**Last updated:** Session 7 (Prompt G)
+**Test count:** 265 passing
 **Ruff findings:** 0
 **Open issues:** TBD (issues created after push)
 
@@ -127,8 +127,8 @@
 | `crm_adapter.py` | CRM mock/prod seam | `get_auth_backend_name()`, `get_user_portfolio()`, `get_team_users()`, `get_user_agency_id()`, `get_agency_list()`, `get_user_names()`, `get_signed_url()` |
 | `speech_provider.py` | Provider adapter | `submit_recording()`, `get_results()`, `delete_resource()`, `ask_question()`, `submit_transcript()`, `update_metadata()`, `ProviderError` |
 | `compliance.py` | Config-driven compliance engine | `check_metadata_compliance()`, `check_provider_compliance()`, `compute_fatal_level()`, `load_compliance_rules()`, `load_fatal_level_rules()`, `load_gazette_holidays()`. All time/date checks use IST via `_IST = ZoneInfo("Asia/Kolkata")`. |
-| `ingestion.py` | Shared ingestion logic | `create_recording_from_row(row, existing_urls=None)` — `existing_urls` set enables O(1) dedup (sync path); None falls back to DB query (CSV path). `run_sync_for_date()` — pre-fetches existing recording_urls for the target date in one query before the loop. `validate_row()`, `parse_datetime_flexible()`, `normalize_column_name()`, `_determine_submission_tier()`, `_load_submission_priority()`. SYNC_QUERY filters/orders on `call_start_time`. |
-| `services.py` | Business logic | `submit_pending_recordings()`, `process_provider_webhook()`, `run_own_llm_scoring()` (placeholder) |
+| `ingestion.py` | Shared ingestion logic | `create_recording_from_row(row, existing_urls=None)` — `existing_urls` set enables O(1) dedup (sync path); None falls back to DB query (CSV path). `run_sync_for_date()` — pre-fetches existing recording_urls for the target date in one query before the loop. `validate_row()`, `parse_datetime_flexible()`, `normalize_column_name()`, `_determine_submission_tier()`, `_load_submission_priority()`. SYNC_QUERY filters/orders on `call_start_time`; min call duration passed as second query param from `SYNC_MIN_CALL_DURATION` setting (default 20s). |
+| `services.py` | Business logic | `submit_pending_recordings()`, `process_provider_webhook()`, `run_own_llm_scoring()` (placeholder), `_normalise_provider_payload(raw, resource_id)` (private — ensures resource_insight_id present in poll responses) |
 | `serializers.py` | DRF serializers | `CallRecordingListSerializer`, `CallTranscriptSerializer`, `ProviderScoreSerializer`, `ComplianceFlagSerializer`, `OwnLLMScoreSerializer`, `CallDetailSerializer`, `DashboardSummarySerializer` |
 | `views.py` | API views | `ProviderWebhookView`, `RecordingListView`, `RecordingDetailView`, `DashboardSummaryView`, `ComplianceFlagListView`, `RecordingImportView`, `SyncCallLogsView` |
 | `urls.py` | URL patterns | 7 routes under `/audit/` |
@@ -141,6 +141,7 @@
 | `import_recordings.py` | CSV/Excel upload -> `CallRecording`. Args: `file_path`, `--sheet`, `--dry-run` |
 | `update_fatal_level_hash.py` | Compute and update `content_hash` in `config/fatal_level_rules.yaml` |
 | `submit_recordings.py` | Submit pending recordings to provider. Args: `--tier`, `--batch-size`, `--dry-run` |
+| `poll_stuck_recordings.py` | Poll provider for results on recordings stuck in `status=submitted` past `POLL_STUCK_AFTER_MINUTES` (default 30). Args: `--batch-size`, `--dry-run` |
 
 ### Tests (`tests/`)
 
@@ -152,14 +153,15 @@
 | `test_services.py` | 11 | Submission pipeline, webhook processing, LLM scoring placeholder |
 | `test_views.py` | 14 | All API views: list, detail, dashboard, compliance flags, pagination, filters |
 | `test_crm_adapter.py` | 7 | All 6 adapter functions in mock mode |
-| `test_ingestion.py` | 33 | Shared ingestion: validate_row, parse_datetime, normalize_column, create_recording_from_row, existing_urls fast-path dedup |
-| `test_sync_call_logs.py` | 14 | sync_call_logs command: mapping, date args, dedup, dry-run, batch-size, pre-fetch dedup, intra-batch dedup |
+| `test_ingestion.py` | 35 | Shared ingestion: validate_row, parse_datetime, normalize_column, create_recording_from_row, existing_urls fast-path dedup, SYNC_QUERY param count |
+| `test_sync_call_logs.py` | 16 | sync_call_logs command: mapping, date args, dedup, dry-run, batch-size, pre-fetch dedup, intra-batch dedup, min_duration param |
 | `test_import_recordings.py` | 24 | import_recordings command + DRF import endpoint: CSV parsing, dedup, RBAC, dry-run, errors |
-| `test_compliance.py` | 38 | Compliance engine: all metadata + provider rules, config loading, holidays, unknown types |
+| `test_compliance.py` | 41 | Compliance engine: all metadata + provider rules, config loading, holidays, unknown types, max_calls default 15 |
 | `test_fatal_level.py` | 14 | Fatal level computation, content hash, update_fatal_level_hash command |
 | `test_sync_api.py` | 9 | Sync API endpoint: RBAC, date parsing, dry-run, response format |
 | `test_submission_tiers.py` | 35 | Tier matching, tier assignment at creation, submit tier filter, S3 re-signing, submit_recordings command |
-| **Total** | **249** | — |
+| `test_poll_stuck_recordings.py` | 8 | poll_stuck_recordings command: query selection, threshold, recovery, errors, dry-run, batch-size |
+| **Total** | **265** | — |
 
 ---
 

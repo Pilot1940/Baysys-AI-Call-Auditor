@@ -371,7 +371,7 @@ class MaxCallsPerCustomerTests(TestCase):
         self.assertEqual(len(max_flags), 0)
 
     @patch("baysys_call_audit.compliance.load_compliance_rules")
-    @override_settings(COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY=3)
+    @override_settings(COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY=15)
     def test_different_customers_independent(self, mock_rules):
         mock_rules.return_value = self.RULES
         dt = datetime(2026, 4, 1, 10, 0, tzinfo=tz.utc)
@@ -383,6 +383,69 @@ class MaxCallsPerCustomerTests(TestCase):
         flags = check_metadata_compliance(r)
         max_flags = [f for f in flags if f.flag_type == "rbi_coc_violation" and "limit" in f.description]
         self.assertEqual(len(max_flags), 0)
+
+
+class MaxCallsThresholdDefaultTests(TestCase):
+    """Tests confirming the new default threshold of 15 (raised from 3)."""
+
+    RULES = {"metadata_rules": [{
+        "id": "M4", "name": "test", "enabled": True,
+        "check_type": "max_calls_per_customer", "severity": "medium",
+        "flag_type": "rbi_coc_violation",
+        "description": "{customer_id} got {call_count} calls on {date} (limit: {max_calls})",
+        "params": {"max_calls": 15},
+    }], "provider_rules": []}
+
+    @patch("baysys_call_audit.compliance.load_compliance_rules")
+    @override_settings(COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY=15)
+    def test_15_calls_no_flag(self, mock_rules):
+        # Exactly at the limit — no flag
+        mock_rules.return_value = self.RULES
+        dt = datetime(2026, 4, 1, 10, 0, tzinfo=tz.utc)
+        for i in range(15):
+            _make_recording(
+                customer_id="C100",
+                recording_url=f"https://s3.example.com/c100_{i}.mp3",
+                recording_datetime=dt,
+            )
+        r = CallRecording.objects.filter(customer_id="C100").last()
+        flags = check_metadata_compliance(r)
+        max_flags = [f for f in flags if "limit" in f.description]
+        self.assertEqual(len(max_flags), 0)
+
+    @patch("baysys_call_audit.compliance.load_compliance_rules")
+    @override_settings(COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY=15)
+    def test_16th_call_creates_flag(self, mock_rules):
+        # One over the limit — flag created
+        mock_rules.return_value = self.RULES
+        dt = datetime(2026, 4, 1, 10, 0, tzinfo=tz.utc)
+        for i in range(16):
+            _make_recording(
+                customer_id="C101",
+                recording_url=f"https://s3.example.com/c101_{i}.mp3",
+                recording_datetime=dt,
+            )
+        r = CallRecording.objects.filter(customer_id="C101").last()
+        flags = check_metadata_compliance(r)
+        max_flags = [f for f in flags if "limit" in f.description]
+        self.assertEqual(len(max_flags), 1)
+
+    @patch("baysys_call_audit.compliance.load_compliance_rules")
+    @override_settings(COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY=5)
+    def test_override_max_calls_to_5(self, mock_rules):
+        # Override to 5 — flag fires at 6 calls
+        mock_rules.return_value = self.RULES
+        dt = datetime(2026, 4, 1, 10, 0, tzinfo=tz.utc)
+        for i in range(6):
+            _make_recording(
+                customer_id="C102",
+                recording_url=f"https://s3.example.com/c102_{i}.mp3",
+                recording_datetime=dt,
+            )
+        r = CallRecording.objects.filter(customer_id="C102").last()
+        flags = check_metadata_compliance(r)
+        max_flags = [f for f in flags if "limit" in f.description]
+        self.assertEqual(len(max_flags), 1)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

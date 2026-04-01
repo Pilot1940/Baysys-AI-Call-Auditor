@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta, timezone as dt_tz
 from io import StringIO
 from unittest.mock import MagicMock, patch
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from baysys_call_audit.ingestion import SYNC_COLUMN_NAMES, map_sync_row
 from baysys_call_audit.management.commands.sync_call_logs import Command
@@ -176,6 +176,32 @@ class SyncCallLogsCommandTests(TestCase):
         self._run_command(date="2026-03-30", batch_size=100, dry_run=False)
 
         cursor.fetchmany.assert_called_with(100)
+
+    @patch("baysys_call_audit.ingestion.connection")
+    @override_settings(SYNC_MIN_CALL_DURATION=20)
+    def test_min_duration_default_passed_to_query(self, mock_conn):
+        cursor = MagicMock()
+        cursor.fetchmany.return_value = []
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+        self._run_command(date="2026-03-30", batch_size=5000, dry_run=False)
+
+        params = cursor.execute.call_args[0][1]
+        self.assertEqual(params[1], 20)
+
+    @patch("baysys_call_audit.ingestion.connection")
+    @override_settings(SYNC_MIN_CALL_DURATION=5)
+    def test_min_duration_override_via_settings(self, mock_conn):
+        cursor = MagicMock()
+        cursor.fetchmany.return_value = []
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+        self._run_command(date="2026-03-30", batch_size=5000, dry_run=False)
+
+        params = cursor.execute.call_args[0][1]
+        self.assertEqual(params[1], 5)
 
 
 class BulkDedupPrefetchTests(TestCase):

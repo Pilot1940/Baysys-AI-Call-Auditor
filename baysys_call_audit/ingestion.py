@@ -20,6 +20,7 @@ import time
 from datetime import date, datetime, timedelta
 from functools import lru_cache
 
+from django.conf import settings
 from django.db import connection
 from django.utils import timezone
 
@@ -113,7 +114,7 @@ FROM uvarcl_live.call_logs cl
 LEFT JOIN uvarcl_live.users u ON cl.agent_id = u.user_id
 WHERE cl.call_start_time::date = %s
   AND cl.recording_s3_path IS NOT NULL
-  AND cl.call_duration > 10
+  AND cl.call_duration > %s
 ORDER BY cl.call_start_time
 """
 
@@ -174,7 +175,8 @@ def run_sync_for_date(
     }
 
     with connection.cursor() as cursor:
-        cursor.execute(SYNC_QUERY, [str(target_date)])
+        min_duration = getattr(settings, "SYNC_MIN_CALL_DURATION", 20)
+        cursor.execute(SYNC_QUERY, [str(target_date), min_duration])
         while True:
             rows = cursor.fetchmany(batch_size)
             if not rows:

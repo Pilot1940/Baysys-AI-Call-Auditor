@@ -18,6 +18,7 @@
 | D | S3 URL re-signing + submission tier system | 2026-04-01 | #6 |
 | E | S3 raw key storage + IST timezone compliance | 2026-04-01 | #8, #9 |
 | F | Bulk dedup pre-fetch: O(1) per row sync performance | 2026-04-01 | #10 |
+| G | Webhook recovery polling + call duration + max calls thresholds | 2026-04-01 | #11, #12, #13 |
 
 ---
 
@@ -320,3 +321,42 @@ Dedup inside the loop is then an O(1) `in` check. `existing_urls` is updated aft
 4. **Intra-batch dedup via set update** — after a successful create, the URL is added to `existing_urls` so a duplicate in the same batch is caught without a DB round trip.
 
 ### Test count at end of session: 249 passing, 0 ruff findings
+
+---
+
+## Session 7 — Prompt G: Poll Recovery + Config Fixes
+
+**Date:** 2026-04-01
+**Scope:** Three targeted fixes discovered during live validation: webhook recovery polling, call duration threshold, max calls threshold.
+**Issues closed:** #11 (webhook recovery), #12 (call duration), #13 (max calls)
+
+### Files created
+
+- `baysys_call_audit/management/commands/poll_stuck_recordings.py` — polls provider every run for submitted recordings with no webhook delivery after `POLL_STUCK_AFTER_MINUTES` (default 30). Args: `--batch-size`, `--dry-run`. Reuses `process_provider_webhook()` for zero code duplication.
+- `baysys_call_audit/tests/test_poll_stuck_recordings.py` — 8 tests
+
+### Files modified
+
+- `settings.py` — `COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY` default 3 → 15; added `SYNC_MIN_CALL_DURATION=20`; added `POLL_STUCK_AFTER_MINUTES=30`
+- `config/compliance_rules.yaml` — M4 `max_calls: 3` → `max_calls: 15`
+- `baysys_call_audit/ingestion.py` — `SYNC_QUERY` call duration `> 10` → `> %s`; `cursor.execute` passes `SYNC_MIN_CALL_DURATION` as second param; added `from django.conf import settings`
+- `baysys_call_audit/services.py` — added `_normalise_provider_payload(raw, resource_id)` (ensures `resource_insight_id` is present in poll responses)
+- `baysys_call_audit/tests/test_ingestion.py` — 2 new tests (SYNC_QUERY param count, no hardcoded duration)
+- `baysys_call_audit/tests/test_sync_call_logs.py` — 2 new tests (min_duration default, override)
+- `baysys_call_audit/tests/test_compliance.py` — 3 new tests (15-call no flag, 16-call flag, override to 5)
+- `.env.example` — added `COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY=15`, `SYNC_MIN_CALL_DURATION=20`, `POLL_STUCK_AFTER_MINUTES=30`
+- `CLAUDE.md`, `MANIFEST.md`, `BUILD_LOG.md`, `docs/OPERATIONS.md` — updated
+
+### Key decisions
+
+1. **`SYNC_MIN_CALL_DURATION` as second query param** — SYNC_QUERY now has two `%s` placeholders. `run_sync_for_date()` passes `[str(target_date), min_duration]`. No f-string template substitution — keeps the query safe from SQL injection.
+
+2. **max_calls default 15** — live DB validation showed customers receiving up to 86 calls/day. The old default of 3 would flag virtually every active account. 15 matches operational reality while still catching genuine violations.
+
+3. **poll_stuck_recordings reuses `process_provider_webhook()`** — no duplicate processing logic. The only addition is `_normalise_provider_payload()` to ensure the resource_id is present in poll responses (which may omit it).
+
+4. **"Still processing" detection** — `get_results()` returns empty `transcript` when processing is not complete. The poll command skips these (increments `still_processing`, not `errors`). `retry_count` is only incremented on `ProviderError`.
+
+5. **Scheduled every 30 minutes** — matches `POLL_STUCK_AFTER_MINUTES` default. Recordings that miss their webhook are recovered within 30–60 minutes.
+
+### Test count at end of session: 265 passing, 0 ruff findings

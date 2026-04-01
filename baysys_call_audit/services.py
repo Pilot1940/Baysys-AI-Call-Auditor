@@ -211,6 +211,17 @@ def _create_provider_score(recording: CallRecording, payload: dict) -> ProviderS
     return score
 
 
+def _normalise_provider_payload(raw: dict, resource_id: str) -> dict:
+    """
+    Ensure the payload contains a resource identifier that process_provider_webhook()
+    can use for lookup. Poll responses may omit the resource_id field that webhook
+    deliveries include — add it if absent.
+    """
+    if raw.get("resource_insight_id") or raw.get("resource_id") or raw.get("id"):
+        return raw
+    return {**raw, "resource_insight_id": resource_id}
+
+
 def _find_subjective(subjective_data: list, parameter_name: str) -> str | None:
     """Find a specific parameter in the subjective_data list."""
     for item in subjective_data:

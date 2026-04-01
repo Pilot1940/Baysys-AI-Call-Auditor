@@ -42,7 +42,7 @@ metadata_rules:
     flag_type: rbi_coc_violation
     description: "Customer {customer_id} received {call_count} calls on {date} (limit: {max_calls})"
     params:
-      max_calls: 3        # COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY overrides
+      max_calls: 15       # COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY overrides
 
 # Provider-based rules - checked after webhook delivers results.
 # These read ONLY from the provider payload or model fields.
