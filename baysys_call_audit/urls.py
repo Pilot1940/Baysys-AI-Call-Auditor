@@ -7,6 +7,7 @@ from .views import (
     RecordingDetailView,
     RecordingImportView,
     RecordingListView,
+    SyncCallLogsView,
 )
 
 app_name = "baysys_call_audit"
@@ -19,6 +20,7 @@ urlpatterns = [
     path("recordings/", RecordingListView.as_view(), name="recording-list"),
     path("recordings/<int:recording_id>/", RecordingDetailView.as_view(), name="recording-detail"),
     path("recordings/import/", RecordingImportView.as_view(), name="recording-import"),
+    path("recordings/sync/", SyncCallLogsView.as_view(), name="sync-call-logs"),
 
     # Dashboard
     path("dashboard/summary/", DashboardSummaryView.as_view(), name="dashboard-summary"),

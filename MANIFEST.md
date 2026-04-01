@@ -1,8 +1,8 @@
 # BaySys Call Audit AI — Code Repository Manifest
 
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
-**Last updated:** Session 2 (Prompt B)
-**Test count:** 135 passing
+**Last updated:** Session 3 (Prompt C)
+**Test count:** 186 passing
 **Ruff findings:** 0
 **Open issues:** TBD (issues created after push)
 
@@ -52,6 +52,7 @@
 | `created_at` | DateTimeField(auto) | Row creation |
 | `submitted_at` | DateTimeField(null) | When sent to provider |
 | `completed_at` | DateTimeField(null) | When results received |
+| `fatal_level` | IntegerField(0) | Computed severity 0-5 from provider boolean scores |
 
 #### `CallTranscript` — Processed transcript + metadata
 | Field | Type | Purpose |
@@ -124,18 +125,20 @@
 | `auth.py` | Authentication + RBAC | `MockUser`, `MockCrmAuth`, `get_auth_backend()`, `AuditPermissionMixin` |
 | `crm_adapter.py` | CRM mock/prod seam | `get_auth_backend_name()`, `get_user_portfolio()`, `get_team_users()`, `get_user_agency_id()`, `get_agency_list()`, `get_user_names()` |
 | `speech_provider.py` | Provider adapter | `submit_recording()`, `get_results()`, `delete_resource()`, `ask_question()`, `submit_transcript()`, `update_metadata()`, `ProviderError` |
-| `ingestion.py` | Shared ingestion logic | `create_recording_from_row()`, `validate_row()`, `parse_datetime_flexible()`, `normalize_column_name()` |
-| `services.py` | Business logic | `submit_pending_recordings()`, `process_provider_webhook()`, `check_compliance()`, `run_own_llm_scoring()` (placeholder) |
+| `compliance.py` | Config-driven compliance engine | `check_metadata_compliance()`, `check_provider_compliance()`, `compute_fatal_level()`, `load_compliance_rules()`, `load_fatal_level_rules()`, `load_gazette_holidays()` |
+| `ingestion.py` | Shared ingestion logic | `create_recording_from_row()`, `run_sync_for_date()`, `validate_row()`, `parse_datetime_flexible()`, `normalize_column_name()` |
+| `services.py` | Business logic | `submit_pending_recordings()`, `process_provider_webhook()`, `run_own_llm_scoring()` (placeholder) |
 | `serializers.py` | DRF serializers | `CallRecordingListSerializer`, `CallTranscriptSerializer`, `ProviderScoreSerializer`, `ComplianceFlagSerializer`, `OwnLLMScoreSerializer`, `CallDetailSerializer`, `DashboardSummarySerializer` |
-| `views.py` | API views | `ProviderWebhookView`, `RecordingListView`, `RecordingDetailView`, `DashboardSummaryView`, `ComplianceFlagListView`, `RecordingImportView` |
-| `urls.py` | URL patterns | 6 routes under `/audit/` |
+| `views.py` | API views | `ProviderWebhookView`, `RecordingListView`, `RecordingDetailView`, `DashboardSummaryView`, `ComplianceFlagListView`, `RecordingImportView`, `SyncCallLogsView` |
+| `urls.py` | URL patterns | 7 routes under `/audit/` |
 
 ### Management commands (`management/commands/`)
 
 | File | Purpose |
 |------|---------|
-| `sync_call_logs.py` | Daily sync from `uvarcl_live.call_logs` + `users` JOIN → `CallRecording`. Args: `--date`, `--batch-size`, `--dry-run` |
-| `import_recordings.py` | CSV/Excel upload → `CallRecording`. Args: `file_path`, `--sheet`, `--dry-run` |
+| `sync_call_logs.py` | Daily sync from `uvarcl_live.call_logs` + `users` JOIN -> `CallRecording`. Args: `--date`, `--batch-size`, `--dry-run` |
+| `import_recordings.py` | CSV/Excel upload -> `CallRecording`. Args: `file_path`, `--sheet`, `--dry-run` |
+| `update_fatal_level_hash.py` | Compute and update `content_hash` in `config/fatal_level_rules.yaml` |
 
 ### Tests (`tests/`)
 
@@ -144,13 +147,16 @@
 | `test_models.py` | 18 | All 5 models: CRUD, constraints, str, compute_percentage |
 | `test_speech_provider.py` | 12 | All 6 provider functions: success + error paths |
 | `test_webhook.py` | 8 | Webhook receiver: success, idempotency, compliance flags, edge cases |
-| `test_services.py` | 13 | Ingestion, webhook processing, compliance checks, LLM scoring placeholder |
+| `test_services.py` | 11 | Submission pipeline, webhook processing, LLM scoring placeholder |
 | `test_views.py` | 14 | All API views: list, detail, dashboard, compliance flags, pagination, filters |
 | `test_crm_adapter.py` | 7 | All 6 adapter functions in mock mode |
 | `test_ingestion.py` | 28 | Shared ingestion: validate_row, parse_datetime, normalize_column, create_recording_from_row |
 | `test_sync_call_logs.py` | 11 | sync_call_logs command: mapping, date args, dedup, dry-run, batch-size |
 | `test_import_recordings.py` | 24 | import_recordings command + DRF import endpoint: CSV parsing, dedup, RBAC, dry-run, errors |
-| **Total** | **135** | — |
+| `test_compliance.py` | 38 | Compliance engine: all metadata + provider rules, config loading, holidays, unknown types |
+| `test_fatal_level.py` | 14 | Fatal level computation, content hash, update_fatal_level_hash command |
+| `test_sync_api.py` | 9 | Sync API endpoint: RBAC, date parsing, dry-run, response format |
+| **Total** | **186** | — |
 
 ---
 
@@ -179,6 +185,14 @@
 | `src/pages/audit/components/TrendChart.tsx` | Trend chart scaffold (charting lib TBD) |
 
 ---
+
+## `config/`
+
+| File | Purpose |
+|------|---------|
+| `compliance_rules.yaml` | Metadata + provider compliance rules (YAML config) |
+| `fatal_level_rules.yaml` | Fatal level parameter weights + content hash |
+| `gazette_holidays_2026.txt` | India gazette holidays for 2026 |
 
 ## `docs/`
 

@@ -28,6 +28,10 @@ class CallRecording(models.Model):
     product_type = models.CharField(max_length=50, null=True, blank=True)
     bank_name = models.CharField(max_length=100, null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending", db_index=True)
+    fatal_level = models.IntegerField(
+        default=0,
+        help_text="Computed severity 0-5 from provider boolean scores. 0 = not yet scored.",
+    )
     provider_resource_id = models.CharField(max_length=100, null=True, blank=True, unique=True)
     error_message = models.TextField(null=True, blank=True)
     retry_count = models.IntegerField(default=0)

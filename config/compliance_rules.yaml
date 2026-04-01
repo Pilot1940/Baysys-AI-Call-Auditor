@@ -1,0 +1,81 @@
+# Compliance rules configuration
+# Each rule: id, name, enabled, check_type, severity, flag_type, params, description
+# Settings overrides: where a Django setting exists for the same param, it takes precedence.
+
+metadata_rules:
+  - id: M1
+    name: Call outside permitted hours
+    enabled: true
+    check_type: call_window
+    severity: critical
+    flag_type: outside_hours
+    description: "Call made outside {start_hour}:00-{end_hour}:00 window"
+    params:
+      start_hour: 8      # COMPLIANCE_CALL_WINDOW_START_HOUR overrides
+      end_hour: 20        # COMPLIANCE_CALL_WINDOW_END_HOUR overrides
+
+  - id: M2
+    name: Call on Sunday
+    enabled: true
+    check_type: blocked_weekday
+    severity: high
+    flag_type: rbi_coc_violation
+    description: "Call made on Sunday - not permitted under RBI COC"
+    params:
+      weekday: 6          # 0=Monday, 6=Sunday
+
+  - id: M3
+    name: Call on gazette holiday
+    enabled: true
+    check_type: gazette_holiday
+    severity: high
+    flag_type: rbi_coc_violation
+    description: "Call made on gazette holiday: {holiday_date}"
+    params:
+      holidays_file: "config/gazette_holidays_2026.txt"
+
+  - id: M4
+    name: Excessive calls to same customer
+    enabled: true
+    check_type: max_calls_per_customer
+    severity: medium
+    flag_type: rbi_coc_violation
+    description: "Customer {customer_id} received {call_count} calls on {date} (limit: {max_calls})"
+    params:
+      max_calls: 3        # COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY overrides
+
+# Provider-based rules - checked after webhook delivers results.
+# These read ONLY from the provider payload or model fields.
+# We NEVER parse transcript text ourselves.
+provider_rules:
+  - id: P1
+    name: Fatal level exceeds threshold
+    enabled: true
+    check_type: fatal_level_threshold
+    severity: critical
+    flag_type: rbi_coc_violation
+    description: "Call fatal level {fatal_level} exceeds threshold {threshold}"
+    params:
+      threshold: 3        # COMPLIANCE_FATAL_THRESHOLD overrides
+
+  - id: P2
+    name: Low compliance score
+    enabled: true
+    check_type: provider_score_threshold
+    severity: high
+    flag_type: rbi_coc_violation
+    description: "Compliance score {score}% below threshold {threshold}%"
+    params:
+      score_field: score_percentage
+      threshold: 50
+
+  - id: P3
+    name: Negative customer sentiment
+    enabled: true
+    check_type: provider_transcript_field
+    severity: medium
+    flag_type: other
+    description: "Customer sentiment detected as {value}"
+    params:
+      field: customer_sentiment
+      flagged_values: ["negative", "very_negative", "angry"]

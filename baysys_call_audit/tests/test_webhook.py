@@ -1,5 +1,6 @@
 """Tests for the provider webhook receiver view."""
 from datetime import datetime, timezone as tz
+from unittest.mock import patch
 
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
@@ -40,9 +41,7 @@ SAMPLE_WEBHOOK_PAYLOAD = {
     "detected_restricted_keyword": False,
     "restricted_keywords": [],
     "insights": {
-        "category_data": [
-            {"audit_parameter_name": "Conversation Category", "answer": ["Request"]},
-        ],
+        "category_data": [],
         "subjective_data": [
             {"audit_parameter_name": "Summary", "answer": "Agent greeted customer."},
             {"audit_parameter_name": "Next Actionable", "answer": "Follow up in 2 days."},
@@ -57,7 +56,9 @@ class ProviderWebhookViewTests(TestCase):
         self.client = APIClient()
         self.url = "/audit/webhook/provider/"
 
-    def test_webhook_success(self):
+    @patch("baysys_call_audit.compliance.load_compliance_rules", return_value={"provider_rules": []})
+    @patch("baysys_call_audit.compliance.load_fatal_level_rules", return_value={})
+    def test_webhook_success(self, _fl, _cr):
         _make_recording()
         resp = self.client.post(self.url, SAMPLE_WEBHOOK_PAYLOAD, format="json")
         self.assertEqual(resp.status_code, 200)
@@ -66,7 +67,9 @@ class ProviderWebhookViewTests(TestCase):
         recording = CallRecording.objects.get(provider_resource_id="RES-100")
         self.assertEqual(recording.status, "completed")
 
-    def test_webhook_creates_transcript(self):
+    @patch("baysys_call_audit.compliance.load_compliance_rules", return_value={"provider_rules": []})
+    @patch("baysys_call_audit.compliance.load_fatal_level_rules", return_value={})
+    def test_webhook_creates_transcript(self, _fl, _cr):
         _make_recording()
         self.client.post(self.url, SAMPLE_WEBHOOK_PAYLOAD, format="json")
 
@@ -77,7 +80,9 @@ class ProviderWebhookViewTests(TestCase):
         self.assertEqual(transcript.summary, "Agent greeted customer.")
         self.assertEqual(transcript.next_actionable, "Follow up in 2 days.")
 
-    def test_webhook_creates_provider_score(self):
+    @patch("baysys_call_audit.compliance.load_compliance_rules", return_value={"provider_rules": []})
+    @patch("baysys_call_audit.compliance.load_fatal_level_rules", return_value={})
+    def test_webhook_creates_provider_score(self, _fl, _cr):
         _make_recording()
         self.client.post(self.url, SAMPLE_WEBHOOK_PAYLOAD, format="json")
 
@@ -105,7 +110,9 @@ class ProviderWebhookViewTests(TestCase):
         # Should not create duplicate transcript
         self.assertEqual(CallTranscript.objects.filter(recording=r).count(), 0)
 
-    def test_webhook_restricted_keywords_creates_flag(self):
+    @patch("baysys_call_audit.compliance.load_compliance_rules", return_value={"provider_rules": []})
+    @patch("baysys_call_audit.compliance.load_fatal_level_rules", return_value={})
+    def test_webhook_restricted_keywords_creates_flag(self, _fl, _cr):
         _make_recording()
         payload = {**SAMPLE_WEBHOOK_PAYLOAD, "detected_restricted_keyword": True, "restricted_keywords": ["threat"]}
         self.client.post(self.url, payload, format="json")
@@ -113,7 +120,11 @@ class ProviderWebhookViewTests(TestCase):
         flags = ComplianceFlag.objects.filter(recording__provider_resource_id="RES-100")
         self.assertTrue(flags.filter(flag_type="restricted_keyword").exists())
 
-    def test_webhook_outside_hours_creates_flag(self):
+    @patch("baysys_call_audit.compliance.load_compliance_rules", return_value={"provider_rules": []})
+    @patch("baysys_call_audit.compliance.load_fatal_level_rules", return_value={})
+    def test_webhook_outside_hours_creates_flag(self, _fl, _cr):
+        """Outside-hours is now a metadata rule checked at ingestion, not webhook.
+        Verify no outside_hours flag from webhook processing."""
         _make_recording(
             recording_datetime=datetime(2026, 4, 1, 6, 0, tzinfo=tz.utc),
             provider_resource_id="RES-EARLY",
@@ -122,4 +133,5 @@ class ProviderWebhookViewTests(TestCase):
         self.client.post(self.url, payload, format="json")
 
         flags = ComplianceFlag.objects.filter(recording__provider_resource_id="RES-EARLY")
-        self.assertTrue(flags.filter(flag_type="outside_hours").exists())
+        # No outside_hours from webhook — that's a metadata rule now
+        self.assertFalse(flags.filter(flag_type="outside_hours").exists())

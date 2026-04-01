@@ -56,7 +56,7 @@ All interaction with the speech analytics provider goes through `speech_provider
 ### 2. `crm_adapter.py` is the single mock/prod seam
 Same pattern as Trainer. `AUDIT_AUTH_BACKEND=mock` in dev, `=crm` in prod. All CRM imports inside function bodies only with `# noqa: PLC0415`.
 
-### 3. Test gate: 135 tests passing, 0 ruff findings
+### 3. Test gate: 186 tests passing, 0 ruff findings
 Before any commit or review:
 ```bash
 python manage.py test --settings=settings_test -v 0   # must pass
@@ -88,7 +88,7 @@ Every session that modifies code MUST update MANIFEST.md, BUILD_LOG.md, and docs
 
 ## Current state (as of 2026-04-01)
 
-- **135 tests passing, 0 ruff findings**
+- **186 tests passing, 0 ruff findings**
 - 5 Django models: CallRecording, CallTranscript, ProviderScore, ComplianceFlag, OwnLLMScore
 - Migration 0001_initial applied
 - speech_provider.py implements GreyLabs (6 public functions)
@@ -96,6 +96,10 @@ Every session that modifies code MUST update MANIFEST.md, BUILD_LOG.md, and docs
 - Ingestion service: `submit_pending_recordings()`, `process_provider_webhook()`, `check_compliance()`
 - **Ingestion pipeline live:** `sync_call_logs` command (daily sync from `uvarcl_live.call_logs` + `users` JOIN), `import_recordings` command (CSV/Excel upload), DRF import endpoint at `/audit/recordings/import/`
 - Shared ingestion logic in `ingestion.py`: dedup on `recording_url`, flexible datetime parsing, column name normalization
+- **Config-driven compliance engine** in `compliance.py`: 4 metadata rules + 3 provider rules from `config/compliance_rules.yaml`
+- **Fatal level system**: weighted boolean scoring from `config/fatal_level_rules.yaml`, stored on `CallRecording.fatal_level` (0-5)
+- **Sync API endpoint** at `/audit/recordings/sync/` (Admin/Supervisor only) — failsafe trigger for daily sync
+- Migration 0002: `fatal_level` field on CallRecording
 - React scaffold (Vite + TS + Tailwind) with pages, types, API client, mock auth
 - AUDIT_AUTH_BACKEND=mock for dev, =crm for production
 
@@ -120,5 +124,6 @@ Every session that modifies code MUST update MANIFEST.md, BUILD_LOG.md, and docs
 |--------|---------------|
 | A | Full scaffold: 5 models, auth, crm_adapter, speech_provider, webhook, ingestion, serializers, views, React scaffold, 72 tests, docs |
 | B | Ingestion pipeline: sync_call_logs + import_recordings + DRF endpoint, 63 new tests (72→135) |
+| C | Sync API + RBI COC compliance engine + fatal level, 51 new tests (135→186) |
 
 Full details in `BUILD_LOG.md`.

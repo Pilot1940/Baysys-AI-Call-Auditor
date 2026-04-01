@@ -7,9 +7,13 @@ Views:
   - RecordingDetailView — single recording detail (auth + RBAC)
   - DashboardSummaryView — aggregate stats (auth + RBAC)
   - ComplianceFlagListView — compliance flags filtered by recording (auth + RBAC)
+  - RecordingImportView — CSV/Excel upload (Admin/Manager)
+  - SyncCallLogsView — failsafe sync trigger (Admin/Supervisor)
 """
 import logging
+from datetime import date
 
+from django.conf import settings as django_settings
 from django.db.models import Avg
 from rest_framework import status
 from rest_framework.permissions import AllowAny
@@ -24,7 +28,7 @@ from .serializers import (
     ComplianceFlagSerializer,
     DashboardSummarySerializer,
 )
-from .ingestion import create_recording_from_row, normalize_column_name, validate_row
+from .ingestion import create_recording_from_row, normalize_column_name, run_sync_for_date, validate_row
 from .services import process_provider_webhook
 
 logger = logging.getLogger(__name__)
@@ -206,6 +210,64 @@ class ComplianceFlagListView(AuditPermissionMixin, APIView):
                 "total_count": total,
                 "total_pages": (total + page_size - 1) // page_size,
             },
+        })
+
+
+class SyncCallLogsView(AuditPermissionMixin, APIView):
+    """
+    POST /audit/recordings/sync/
+    Failsafe trigger for call_logs sync. Same logic as sync_call_logs management command.
+    Restricted to Admin (role_id=1) and Supervisor (role_id=4).
+    """
+    authentication_classes = [get_auth_backend()]
+
+    def post(self, request):
+        allowed = getattr(django_settings, "SYNC_ALLOWED_ROLES", {1, 4})
+        role = self.get_user_role(request)
+        if role not in allowed:
+            return Response(
+                {"error": "Insufficient permissions. Admin or Supervisor required."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        data = request.data or {}
+
+        # Parse date
+        date_str = data.get("date")
+        if date_str:
+            try:
+                target_date = date.fromisoformat(date_str)
+            except (ValueError, TypeError):
+                return Response(
+                    {"error": "Invalid date format. Use YYYY-MM-DD."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            target_date = None  # run_sync_for_date defaults to yesterday
+
+        batch_size = data.get("batch_size", 5000)
+        dry_run = data.get("dry_run", False)
+
+        user_id = getattr(request.user, "user_id", None)
+        logger.info("Sync triggered via API by user_id=%s for date=%s", user_id, target_date)
+
+        counts = run_sync_for_date(
+            target_date=target_date,
+            batch_size=batch_size,
+            dry_run=dry_run,
+        )
+
+        return Response({
+            "status": "ok",
+            "date": str(target_date or "yesterday"),
+            "dry_run": dry_run,
+            "total_fetched": counts["fetched"],
+            "created": counts["created"],
+            "skipped_dedup": counts["skipped_dedup"],
+            "skipped_validation": counts["skipped_validation"],
+            "unknown_agents": counts["unknown_agents"],
+            "errors": counts["errors"],
+            "duration_seconds": counts["duration_seconds"],
         })
 
 

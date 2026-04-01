@@ -105,3 +105,8 @@ SPEECH_PROVIDER_RATE_LIMIT = config("SPEECH_PROVIDER_RATE_LIMIT", default=200, c
 # Compliance rules (configurable, not hardcoded)
 COMPLIANCE_CALL_WINDOW_START_HOUR = config("COMPLIANCE_CALL_WINDOW_START_HOUR", default=8, cast=int)
 COMPLIANCE_CALL_WINDOW_END_HOUR = config("COMPLIANCE_CALL_WINDOW_END_HOUR", default=20, cast=int)
+COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY = config("COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY", default=3, cast=int)
+COMPLIANCE_FATAL_THRESHOLD = config("COMPLIANCE_FATAL_THRESHOLD", default=3, cast=int)
+
+# Sync API endpoint — roles allowed to trigger sync
+SYNC_ALLOWED_ROLES = {1, 4}  # Admin, Supervisor

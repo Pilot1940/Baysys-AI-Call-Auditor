@@ -1,0 +1,44 @@
+# Fatal Level Rules - maps provider boolean scoring parameters to fatal_level (0-5)
+# Ops can edit weights, add/remove parameters, adjust threshold.
+# The content_hash is computed from all content BELOW the hash line.
+# If the hash doesn't match, the engine logs a WARNING but continues.
+
+version: "1.0"                # increment on every edit (semver: major.minor)
+last_updated: "2026-04-01"    # ISO date of last edit
+updated_by: "PC"              # who made the change
+content_hash: "e8dcc5d25626f0dea23589d4dcf21246c2b1f3c663b3f002372044bf10e9b112"              # auto-computed via: python manage.py update_fatal_level_hash
+
+# The provider returns boolean (0/1) for each parameter in category_data.
+# Each parameter here maps to a key in ProviderScore.category_data JSON.
+# "weight" = how much this parameter contributes to fatal_level when triggered.
+# "invert" = true means the parameter triggers on value 1 (e.g., abusive_language_detected=1 is bad).
+#            false (default) means the parameter triggers on value 0 (e.g., agent_identified=0 is bad).
+
+parameters:
+  - name: abusive_language_detected
+    weight: 3
+    invert: true       # triggers when value = 1 (detected)
+
+  - name: threatening_language_detected
+    weight: 3
+    invert: true
+
+  - name: agent_identified
+    weight: 1
+    invert: false      # triggers when value = 0 (agent did NOT identify)
+
+  - name: purpose_stated
+    weight: 1
+    invert: false
+
+  - name: third_party_disclosure
+    weight: 2
+    invert: true
+
+  - name: called_within_permitted_hours
+    weight: 1
+    invert: false
+
+# fatal_level = min(sum_of_triggered_weights, 5)
+# The compliance rule P1 checks: fatal_level >= threshold
+threshold: 3

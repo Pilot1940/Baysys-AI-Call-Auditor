@@ -10,7 +10,6 @@ from baysys_call_audit.models import (
     ProviderScore,
 )
 from baysys_call_audit.services import (
-    check_compliance,
     process_provider_webhook,
     run_own_llm_scoring,
     submit_pending_recordings,
@@ -91,7 +90,9 @@ class SubmitPendingRecordingsTests(TestCase):
 
 @override_settings(SPEECH_PROVIDER_TEMPLATE_ID="TPL-001")
 class ProcessProviderWebhookTests(TestCase):
-    def test_process_webhook_creates_all(self):
+    @patch("baysys_call_audit.compliance.load_compliance_rules", return_value={"provider_rules": []})
+    @patch("baysys_call_audit.compliance.load_fatal_level_rules", return_value={})
+    def test_process_webhook_creates_all(self, _fl, _cr):
         r = _make_recording(status="submitted", provider_resource_id="RES-200")
         payload = {
             "resource_insight_id": "RES-200",
@@ -126,41 +127,6 @@ class ProcessProviderWebhookTests(TestCase):
         result = process_provider_webhook({"resource_insight_id": "RES-300"})
         self.assertIsNotNone(result)
         self.assertEqual(CallTranscript.objects.count(), 0)
-
-
-@override_settings(
-    COMPLIANCE_CALL_WINDOW_START_HOUR=8,
-    COMPLIANCE_CALL_WINDOW_END_HOUR=20,
-)
-class CheckComplianceTests(TestCase):
-    def test_call_within_hours_no_flag(self):
-        r = _make_recording(recording_datetime=datetime(2026, 4, 1, 10, 0, tzinfo=tz.utc))
-        flags = check_compliance(r, {"restricted_keywords": [], "detected_restricted_keyword": False})
-        outside_hour_flags = [f for f in flags if f.flag_type == "outside_hours"]
-        self.assertEqual(len(outside_hour_flags), 0)
-
-    def test_call_before_hours_creates_flag(self):
-        r = _make_recording(recording_datetime=datetime(2026, 4, 1, 6, 30, tzinfo=tz.utc))
-        flags = check_compliance(r, {"restricted_keywords": [], "detected_restricted_keyword": False})
-        outside_hour_flags = [f for f in flags if f.flag_type == "outside_hours"]
-        self.assertEqual(len(outside_hour_flags), 1)
-        self.assertEqual(outside_hour_flags[0].severity, "critical")
-
-    def test_call_after_hours_creates_flag(self):
-        r = _make_recording(recording_datetime=datetime(2026, 4, 1, 21, 0, tzinfo=tz.utc))
-        flags = check_compliance(r, {"restricted_keywords": [], "detected_restricted_keyword": False})
-        outside_hour_flags = [f for f in flags if f.flag_type == "outside_hours"]
-        self.assertEqual(len(outside_hour_flags), 1)
-
-    def test_restricted_keywords_creates_flag(self):
-        r = _make_recording()
-        flags = check_compliance(r, {
-            "detected_restricted_keyword": True,
-            "restricted_keywords": ["threat", "abuse"],
-        })
-        kw_flags = [f for f in flags if f.flag_type == "restricted_keyword"]
-        self.assertEqual(len(kw_flags), 1)
-        self.assertIn("threat", kw_flags[0].description)
 
 
 class OwnLLMScoringTests(TestCase):

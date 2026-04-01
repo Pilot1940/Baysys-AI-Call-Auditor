@@ -114,6 +114,25 @@ Query: ?dry_run=true (optional)
 Requires: Admin (role_id=1) or Manager/TL (role_id=2)
 ```
 
+### Path 3: Sync API endpoint (failsafe)
+
+Same logic as the management command, triggered via HTTP. Use when cron missed or for ad-hoc sync.
+
+```
+POST /audit/recordings/sync/
+Content-Type: application/json
+Auth: Admin (role_id=1) or Supervisor (role_id=4)
+
+Body (all optional):
+{
+    "date": "2026-04-01",
+    "batch_size": 5000,
+    "dry_run": false
+}
+
+Response: {"status": "ok", "date": "...", "created": N, ...}
+```
+
 ### Submitting to speech provider
 
 After ingestion, `CallRecording` rows are in `status=pending`. Submit them to the provider:
@@ -209,6 +228,52 @@ ORDER BY created_at DESC;
 | `SPEECH_PROVIDER_RATE_LIMIT` | No | 200 | Max requests/min to provider |
 | `COMPLIANCE_CALL_WINDOW_START_HOUR` | No | 8 | Earliest permitted call hour |
 | `COMPLIANCE_CALL_WINDOW_END_HOUR` | No | 20 | Latest permitted call hour |
+| `COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY` | No | 3 | Max calls to same customer per day |
+| `COMPLIANCE_FATAL_THRESHOLD` | No | 3 | Fatal level threshold for compliance flag |
+
+---
+
+## Compliance Rules (config/compliance_rules.yaml)
+
+Rules are config-driven. Two categories:
+
+- **Metadata rules** — run at ingestion time using CallRecording fields only
+  - `M1 call_window`: Call outside permitted hours (8am-8pm default, settings override)
+  - `M2 blocked_weekday`: Call on Sunday
+  - `M3 gazette_holiday`: Call on gazette holiday (dates in `config/gazette_holidays_2026.txt`)
+  - `M4 max_calls_per_customer`: >3 calls to same customer on same day
+
+- **Provider rules** — run after webhook delivers results
+  - `P1 fatal_level_threshold`: Fatal level >= threshold
+  - `P2 provider_score_threshold`: Compliance score below threshold
+  - `P3 provider_transcript_field`: Negative customer sentiment
+
+**To add/modify rules:** Edit `config/compliance_rules.yaml`. Adding a rule of an existing `check_type` requires no code changes.
+
+**To disable a rule:** Set `enabled: false` in the YAML.
+
+**To add gazette holidays for a new year:** Create `config/gazette_holidays_2027.txt` (one date per line, YYYY-MM-DD), then update `M3.params.holidays_file` in `compliance_rules.yaml`.
+
+---
+
+## Fatal Level System (config/fatal_level_rules.yaml)
+
+Maps provider boolean scoring parameters to a severity score (0-5).
+
+**Formula:** `fatal_level = min(sum_of_triggered_weights, 5)`
+
+A parameter is "triggered" when:
+- Normal (`invert: false`): provider returns 0 (failed)
+- Inverted (`invert: true`): provider returns 1 (e.g. abusive language detected)
+
+### Version update workflow
+
+1. Edit `config/fatal_level_rules.yaml` (weights, parameters, threshold)
+2. Bump `version` (semver), update `last_updated` (ISO date), `updated_by` (name)
+3. Run: `python manage.py update_fatal_level_hash`
+4. Commit to git — audit trail complete
+
+The `content_hash` field provides audit integrity. If the hash doesn't match, the engine logs a WARNING but continues scoring.
 
 ---
 

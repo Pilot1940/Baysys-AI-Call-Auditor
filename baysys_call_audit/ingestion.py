@@ -4,22 +4,133 @@ Shared ingestion logic for populating CallRecording from external sources.
 Used by:
   - sync_call_logs management command (daily sync from uvarcl_live.call_logs)
   - import_recordings management command (CSV/Excel upload)
+  - SyncCallLogsView API endpoint (failsafe trigger)
 
 Key functions:
   - create_recording_from_row()   -> dedup + create CallRecording
+  - run_sync_for_date()           -> core sync logic (raw SQL + ingestion)
   - validate_row()                -> validate a row dict
   - parse_datetime_flexible()     -> parse various datetime formats
   - normalize_column_name()       -> normalize CSV/Excel headers
 """
 import logging
 import re
-from datetime import datetime
+import time
+from datetime import date, datetime, timedelta
 
+from django.db import connection
 from django.utils import timezone
 
 from .models import CallRecording
 
 logger = logging.getLogger(__name__)
+
+SYNC_QUERY = """\
+SELECT
+    cl.id AS source_id,
+    cl.agent_id,
+    COALESCE(TRIM(u.first_name || ' ' || u.last_name), 'Unknown') AS agent_name,
+    u.agency_id,
+    cl.customer_id,
+    cl.customer_number,
+    cl.recording_s3_path,
+    cl.created_at,
+    cl.call_duration,
+    cl.campaign_name,
+    cl.loan_id
+FROM uvarcl_live.call_logs cl
+LEFT JOIN uvarcl_live.users u ON cl.agent_id = u.user_id
+WHERE cl.created_at::date = %s
+  AND cl.recording_s3_path IS NOT NULL
+  AND cl.call_duration > 10
+ORDER BY cl.created_at
+"""
+
+SYNC_COLUMN_NAMES = [
+    "source_id", "agent_id", "agent_name", "agency_id", "customer_id",
+    "customer_number", "recording_s3_path", "created_at", "call_duration",
+    "campaign_name", "loan_id",
+]
+
+
+def map_sync_row(row_dict: dict) -> dict:
+    """Map raw query result columns to CallRecording field names."""
+    return {
+        "agent_id": str(row_dict["agent_id"]) if row_dict.get("agent_id") is not None else None,
+        "agent_name": row_dict.get("agent_name") or "Unknown",
+        "agency_id": str(row_dict["agency_id"]) if row_dict.get("agency_id") is not None else None,
+        "customer_id": str(row_dict["customer_id"]) if row_dict.get("customer_id") is not None else None,
+        "customer_phone": row_dict.get("customer_number"),
+        "recording_url": row_dict.get("recording_s3_path"),
+        "recording_datetime": row_dict.get("created_at"),
+        "bank_name": row_dict.get("campaign_name"),
+        "portfolio_id": str(row_dict["loan_id"]) if row_dict.get("loan_id") is not None else None,
+    }
+
+
+def run_sync_for_date(
+    target_date: date | None = None,
+    batch_size: int = 5000,
+    dry_run: bool = False,
+) -> dict:
+    """
+    Core sync logic: read from uvarcl_live.call_logs + users, create CallRecording rows.
+
+    Called by both the management command and the API endpoint.
+
+    Returns dict with keys: fetched, created, skipped_dedup, skipped_validation,
+    unknown_agents, errors, duration_seconds.
+    """
+    if target_date is None:
+        target_date = date.today() - timedelta(days=1)
+
+    start_time = time.monotonic()
+    counts = {
+        "fetched": 0,
+        "created": 0,
+        "skipped_dedup": 0,
+        "skipped_validation": 0,
+        "unknown_agents": 0,
+        "errors": 0,
+    }
+
+    with connection.cursor() as cursor:
+        cursor.execute(SYNC_QUERY, [str(target_date)])
+        while True:
+            rows = cursor.fetchmany(batch_size)
+            if not rows:
+                break
+
+            for db_row in rows:
+                counts["fetched"] += 1
+                row_dict = dict(zip(SYNC_COLUMN_NAMES, db_row))
+                mapped = map_sync_row(row_dict)
+
+                if mapped.get("agent_name") == "Unknown":
+                    counts["unknown_agents"] += 1
+
+                if dry_run:
+                    errors = validate_row(mapped)
+                    if errors:
+                        counts["skipped_validation"] += 1
+                    else:
+                        counts["created"] += 1
+                    continue
+
+                try:
+                    recording, created = create_recording_from_row(mapped)
+                    if created:
+                        counts["created"] += 1
+                    elif recording is None:
+                        counts["skipped_validation"] += 1
+                    else:
+                        counts["skipped_dedup"] += 1
+                except Exception:
+                    counts["errors"] += 1
+                    logger.exception("Error creating recording from row")
+
+    counts["duration_seconds"] = round(time.monotonic() - start_time, 1)
+    return counts
 
 
 def create_recording_from_row(row: dict) -> tuple[CallRecording | None, bool]:
@@ -75,6 +186,12 @@ def create_recording_from_row(row: dict) -> tuple[CallRecording | None, bool]:
         bank_name=str(row["bank_name"]).strip() if row.get("bank_name") else None,
         status="pending",
     )
+
+    # Run metadata compliance checks at ingestion time
+    from .compliance import check_metadata_compliance  # noqa: PLC0415
+
+    check_metadata_compliance(recording)
+
     return (recording, True)
 
 

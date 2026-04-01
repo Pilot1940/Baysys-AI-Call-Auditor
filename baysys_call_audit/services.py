@@ -1,11 +1,12 @@
 """
-Ingestion pipeline, scoring logic, and compliance flag generation.
+Ingestion pipeline, scoring logic, and compliance integration.
 
 Key services:
   - submit_pending_recordings()   -> batch-submit recordings to provider
   - process_provider_webhook()    -> handle provider callback, create transcript + scores + flags
-  - check_compliance()            -> generate compliance flags from provider response
   - run_own_llm_scoring()         -> placeholder for custom LLM scoring (future)
+
+Compliance logic lives in compliance.py (config-driven engine).
 """
 import logging
 
@@ -13,10 +14,10 @@ from django.conf import settings
 from django.utils import timezone
 
 from . import speech_provider
+from .compliance import check_provider_compliance, compute_fatal_level
 from .models import (
     CallRecording,
     CallTranscript,
-    ComplianceFlag,
     OwnLLMScore,
     ProviderScore,
 )
@@ -121,10 +122,13 @@ def process_provider_webhook(payload: dict) -> CallRecording | None:
     _create_transcript(recording, payload)
 
     # Create provider scores
-    _create_provider_score(recording, payload)
+    score = _create_provider_score(recording, payload)
 
-    # Generate compliance flags
-    check_compliance(recording, payload)
+    # Compute fatal level from provider boolean scores
+    compute_fatal_level(recording, score)
+
+    # Run provider compliance rules (config-driven)
+    check_provider_compliance(recording, payload)
 
     # Mark complete
     recording.status = "completed"
@@ -190,61 +194,6 @@ def _find_subjective(subjective_data: list, parameter_name: str) -> str | None:
     for item in subjective_data:
         if item.get("audit_parameter_name") == parameter_name:
             return item.get("answer")
-    return None
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Compliance flag generation
-# ─────────────────────────────────────────────────────────────────────────────
-
-def check_compliance(recording: CallRecording, payload: dict) -> list[ComplianceFlag]:
-    """
-    Evaluate provider response for compliance violations.
-    Creates ComplianceFlag rows for each violation found.
-
-    Current checks:
-      - Calls outside permitted hours (configurable via settings)
-      - Restricted keywords detected by provider
-    """
-    flags = []
-
-    # Check call timing (RBI COC: calls only between 8am-8pm)
-    flag = _check_call_timing(recording)
-    if flag:
-        flags.append(flag)
-
-    # Check restricted keywords from provider
-    restricted = payload.get("restricted_keywords", [])
-    if payload.get("detected_restricted_keyword") or restricted:
-        flag = ComplianceFlag.objects.create(
-            recording=recording,
-            flag_type="restricted_keyword",
-            severity="high",
-            description=f"Restricted keywords detected: {', '.join(restricted)}",
-            evidence=str(restricted),
-        )
-        flags.append(flag)
-
-    return flags
-
-
-def _check_call_timing(recording: CallRecording) -> ComplianceFlag | None:
-    """Check if the call was made outside permitted hours."""
-    start_hour = settings.COMPLIANCE_CALL_WINDOW_START_HOUR
-    end_hour = settings.COMPLIANCE_CALL_WINDOW_END_HOUR
-
-    call_hour = recording.recording_datetime.hour
-    if call_hour < start_hour or call_hour >= end_hour:
-        return ComplianceFlag.objects.create(
-            recording=recording,
-            flag_type="outside_hours",
-            severity="critical",
-            description=(
-                f"Call made at {recording.recording_datetime.strftime('%H:%M')} — "
-                f"outside permitted window ({start_hour:02d}:00–{end_hour:02d}:00)"
-            ),
-            evidence=recording.recording_datetime.isoformat(),
-        )
     return None
 
 

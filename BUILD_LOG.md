@@ -3,7 +3,7 @@
 **Project:** BaySys Call Audit AI
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
 **Build start:** 2026-04-01
-**Last updated:** 2026-04-01 (Session 2)
+**Last updated:** 2026-04-01 (Session 3)
 **Build method:** Claude Code (Opus 4.6)
 
 ---
@@ -14,7 +14,7 @@
 |--------|-------|-------------|---------------|
 | A | Full scaffold: Django + React + models + tests | 2026-04-01 | — |
 | B | Ingestion pipeline: call_logs sync + CSV upload | 2026-04-01 | #4, #5 |
-| C | End-to-end testing — integration + load | TBD | — |
+| C | Sync API + RBI COC compliance engine + fatal level | 2026-04-01 | #7 |
 
 ---
 
@@ -127,3 +127,55 @@
 7. **openpyxl for Excel** — added to requirements.txt. Only imported inside function bodies to avoid import errors if not installed.
 
 ### Test count at end of session: 135 passing, 0 ruff findings
+
+---
+
+## Session 3 — Prompt C: Sync API + Compliance Engine + Fatal Level
+
+**Date:** 2026-04-01
+**Scope:** Failsafe sync API endpoint, config-driven RBI COC compliance engine (YAML), fatal level weighted boolean scoring.
+**Issues closed:** #7
+
+### Files created
+
+- `baysys_call_audit/compliance.py` — config-driven compliance engine: metadata rules (call_window, blocked_weekday, gazette_holiday, max_calls_per_customer), provider rules (fatal_level_threshold, provider_score_threshold, provider_transcript_field), fatal level computation from provider boolean scores, content hash verification
+- `config/compliance_rules.yaml` — 4 metadata rules + 3 provider rules
+- `config/fatal_level_rules.yaml` — 6 boolean parameters with weights, content hash
+- `config/gazette_holidays_2026.txt` — 22 India gazette holidays
+- `baysys_call_audit/migrations/0002_callrecording_fatal_level.py` — adds `fatal_level` IntegerField
+- `baysys_call_audit/management/commands/update_fatal_level_hash.py` — computes SHA-256 content hash for fatal_level_rules.yaml
+- `baysys_call_audit/tests/test_compliance.py` — 38 tests
+- `baysys_call_audit/tests/test_fatal_level.py` — 14 tests
+- `baysys_call_audit/tests/test_sync_api.py` — 9 tests
+
+### Files modified
+
+- `baysys_call_audit/models.py` — added `fatal_level` field to CallRecording
+- `baysys_call_audit/services.py` — removed old `check_compliance()` + `_check_call_timing()`, integrated `compliance.py` (compute_fatal_level + check_provider_compliance) into webhook processing
+- `baysys_call_audit/ingestion.py` — factored `run_sync_for_date()` as shared sync core, added `check_metadata_compliance()` call after recording creation
+- `baysys_call_audit/views.py` — added `SyncCallLogsView` (POST /audit/recordings/sync/, Admin/Supervisor only)
+- `baysys_call_audit/urls.py` — added `recordings/sync/` route
+- `baysys_call_audit/management/commands/sync_call_logs.py` — thin wrapper calling `run_sync_for_date()`
+- `settings.py` — added `COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY`, `COMPLIANCE_FATAL_THRESHOLD`, `SYNC_ALLOWED_ROLES`
+- `requirements.txt` — added `pyyaml>=6.0`
+- `baysys_call_audit/tests/test_services.py` — updated: removed `check_compliance` import, mocked compliance in webhook tests
+- `baysys_call_audit/tests/test_webhook.py` — updated: mocked compliance engine, adjusted outside_hours test
+- `baysys_call_audit/tests/test_sync_call_logs.py` — updated: imports from `ingestion.py` instead of command module
+
+### Key decisions
+
+1. **Config-driven compliance** — rules in `config/compliance_rules.yaml`. Adding a rule of an existing check_type = YAML-only change, no code.
+
+2. **Metadata rules at ingestion, provider rules at webhook** — clear separation. Metadata compliance runs when CallRecording is created; provider compliance runs when webhook delivers results.
+
+3. **Fatal level from boolean scores** — `config/fatal_level_rules.yaml` maps provider boolean parameters to weighted scores. `fatal_level = min(sum_triggered_weights, 5)`. Ops edits weights, runs `update_fatal_level_hash`, commits to git.
+
+4. **Content hash for audit integrity** — SHA-256 of YAML content (excluding hash line) stored in `content_hash` field. Mismatch logs WARNING but does not block scoring.
+
+5. **Settings override YAML params** — Django settings (`COMPLIANCE_CALL_WINDOW_START_HOUR`, etc.) take precedence over YAML defaults.
+
+6. **Sync logic factored into `ingestion.py`** — `run_sync_for_date()` is the single implementation. Management command and API view are both thin wrappers.
+
+7. **Restricted keywords preserved in provider compliance** — carried over from the old engine as a hardcoded check alongside config-driven rules.
+
+### Test count at end of session: 186 passing, 0 ruff findings
