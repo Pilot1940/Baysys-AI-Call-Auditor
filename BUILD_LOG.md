@@ -3,7 +3,7 @@
 **Project:** BaySys Call Audit AI
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
 **Build start:** 2026-04-01
-**Last updated:** 2026-04-01 (Session 1)
+**Last updated:** 2026-04-01 (Session 2)
 **Build method:** Claude Code (Opus 4.6)
 
 ---
@@ -13,7 +13,7 @@
 | Prompt | Scope | Session date | Issues closed |
 |--------|-------|-------------|---------------|
 | A | Full scaffold: Django + React + models + tests | 2026-04-01 | — |
-| B | React analytics dashboard — full build | TBD | — |
+| B | Ingestion pipeline: call_logs sync + CSV upload | 2026-04-01 | #4, #5 |
 | C | End-to-end testing — integration + load | TBD | — |
 
 ---
@@ -81,3 +81,49 @@
 7. **Separate schema, same Supabase instance** — `DB_SCHEMA=baysys_call_audit` in settings. No FK relationships to Trainer tables. Comparison happens at dashboard layer.
 
 ### Test count at end of session: 72 passing, 0 ruff findings
+
+---
+
+## Session 2 — Prompt B: Ingestion Pipeline
+
+**Date:** 2026-04-01
+**Scope:** Two ingestion paths to populate CallRecording: daily sync from uvarcl_live.call_logs + CSV/Excel upload.
+**Issues closed:** #4, #5
+
+### Files created
+
+- `baysys_call_audit/ingestion.py` — shared ingestion logic: `create_recording_from_row()`, `validate_row()`, `parse_datetime_flexible()`, `normalize_column_name()`
+- `baysys_call_audit/management/__init__.py`
+- `baysys_call_audit/management/commands/__init__.py`
+- `baysys_call_audit/management/commands/sync_call_logs.py` — daily sync from `uvarcl_live.call_logs` LEFT JOIN `uvarcl_live.users`, raw SQL via `django.db.connection`, args: `--date`, `--batch-size`, `--dry-run`
+- `baysys_call_audit/management/commands/import_recordings.py` — CSV/Excel upload via `csv` + `openpyxl`, normalized column headers, args: `file_path`, `--sheet`, `--dry-run`
+- `baysys_call_audit/tests/test_ingestion.py` — 28 tests
+- `baysys_call_audit/tests/test_sync_call_logs.py` — 11 tests
+- `baysys_call_audit/tests/test_import_recordings.py` — 24 tests
+
+### Files modified
+
+- `baysys_call_audit/views.py` — added `RecordingImportView` (POST /audit/recordings/import/, Admin/Manager only)
+- `baysys_call_audit/urls.py` — added `recordings/import/` route
+- `requirements.txt` — added `openpyxl>=3.1`
+- `MANIFEST.md` — updated with new files, test counts
+- `BUILD_LOG.md` — this entry
+- `docs/OPERATIONS.md` — added sync + import usage sections
+
+### Key decisions
+
+1. **Raw SQL for call_logs/users** — these are CRM-owned tables in `uvarcl_live` schema. No Django models created. Raw SQL with `django.db.connection.cursor()` keeps us read-only.
+
+2. **Single JOIN, not two-pass** — agent name resolved in the same query via LEFT JOIN to `users`. No second enrichment step. `agent_name` defaults to `'Unknown'` if user lookup fails.
+
+3. **Dedup on `recording_url`** — `create_recording_from_row()` checks for existing rows before creating. Running sync twice for the same date is safe.
+
+4. **Shared ingestion layer** — `ingestion.py` contains all validation, dedup, datetime parsing, and column normalization. Both the sync command and import command use the same core function.
+
+5. **DRF import endpoint** — convenience API at `/audit/recordings/import/`. Restricted to role_id 1 (Admin) and 2 (Manager/TL). Management command is the primary mechanism.
+
+6. **Column name normalization** — `normalize_column_name()` handles spaces, camelCase, hyphens, so CSV headers like "Agent ID" or "agentId" both map to `agent_id`.
+
+7. **openpyxl for Excel** — added to requirements.txt. Only imported inside function bodies to avoid import errors if not installed.
+
+### Test count at end of session: 135 passing, 0 ruff findings

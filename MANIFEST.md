@@ -1,8 +1,8 @@
 # BaySys Call Audit AI — Code Repository Manifest
 
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
-**Last updated:** Session 1 (Prompt A)
-**Test count:** 72 passing
+**Last updated:** Session 2 (Prompt B)
+**Test count:** 135 passing
 **Ruff findings:** 0
 **Open issues:** TBD (issues created after push)
 
@@ -124,10 +124,18 @@
 | `auth.py` | Authentication + RBAC | `MockUser`, `MockCrmAuth`, `get_auth_backend()`, `AuditPermissionMixin` |
 | `crm_adapter.py` | CRM mock/prod seam | `get_auth_backend_name()`, `get_user_portfolio()`, `get_team_users()`, `get_user_agency_id()`, `get_agency_list()`, `get_user_names()` |
 | `speech_provider.py` | Provider adapter | `submit_recording()`, `get_results()`, `delete_resource()`, `ask_question()`, `submit_transcript()`, `update_metadata()`, `ProviderError` |
+| `ingestion.py` | Shared ingestion logic | `create_recording_from_row()`, `validate_row()`, `parse_datetime_flexible()`, `normalize_column_name()` |
 | `services.py` | Business logic | `submit_pending_recordings()`, `process_provider_webhook()`, `check_compliance()`, `run_own_llm_scoring()` (placeholder) |
 | `serializers.py` | DRF serializers | `CallRecordingListSerializer`, `CallTranscriptSerializer`, `ProviderScoreSerializer`, `ComplianceFlagSerializer`, `OwnLLMScoreSerializer`, `CallDetailSerializer`, `DashboardSummarySerializer` |
-| `views.py` | API views | `ProviderWebhookView`, `RecordingListView`, `RecordingDetailView`, `DashboardSummaryView`, `ComplianceFlagListView` |
-| `urls.py` | URL patterns | 5 routes under `/audit/` |
+| `views.py` | API views | `ProviderWebhookView`, `RecordingListView`, `RecordingDetailView`, `DashboardSummaryView`, `ComplianceFlagListView`, `RecordingImportView` |
+| `urls.py` | URL patterns | 6 routes under `/audit/` |
+
+### Management commands (`management/commands/`)
+
+| File | Purpose |
+|------|---------|
+| `sync_call_logs.py` | Daily sync from `uvarcl_live.call_logs` + `users` JOIN → `CallRecording`. Args: `--date`, `--batch-size`, `--dry-run` |
+| `import_recordings.py` | CSV/Excel upload → `CallRecording`. Args: `file_path`, `--sheet`, `--dry-run` |
 
 ### Tests (`tests/`)
 
@@ -139,7 +147,10 @@
 | `test_services.py` | 13 | Ingestion, webhook processing, compliance checks, LLM scoring placeholder |
 | `test_views.py` | 14 | All API views: list, detail, dashboard, compliance flags, pagination, filters |
 | `test_crm_adapter.py` | 7 | All 6 adapter functions in mock mode |
-| **Total** | **72** | — |
+| `test_ingestion.py` | 28 | Shared ingestion: validate_row, parse_datetime, normalize_column, create_recording_from_row |
+| `test_sync_call_logs.py` | 11 | sync_call_logs command: mapping, date args, dedup, dry-run, batch-size |
+| `test_import_recordings.py` | 24 | import_recordings command + DRF import endpoint: CSV parsing, dedup, RBAC, dry-run, errors |
+| **Total** | **135** | — |
 
 ---
 

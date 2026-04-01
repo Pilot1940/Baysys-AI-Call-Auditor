@@ -5,6 +5,7 @@ from .views import (
     DashboardSummaryView,
     ProviderWebhookView,
     RecordingDetailView,
+    RecordingImportView,
     RecordingListView,
 )
 
@@ -17,6 +18,7 @@ urlpatterns = [
     # Recordings
     path("recordings/", RecordingListView.as_view(), name="recording-list"),
     path("recordings/<int:recording_id>/", RecordingDetailView.as_view(), name="recording-detail"),
+    path("recordings/import/", RecordingImportView.as_view(), name="recording-import"),
 
     # Dashboard
     path("dashboard/summary/", DashboardSummaryView.as_view(), name="dashboard-summary"),

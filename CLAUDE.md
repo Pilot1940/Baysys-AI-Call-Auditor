@@ -56,7 +56,7 @@ All interaction with the speech analytics provider goes through `speech_provider
 ### 2. `crm_adapter.py` is the single mock/prod seam
 Same pattern as Trainer. `AUDIT_AUTH_BACKEND=mock` in dev, `=crm` in prod. All CRM imports inside function bodies only with `# noqa: PLC0415`.
 
-### 3. Test gate: 72 tests passing, 0 ruff findings
+### 3. Test gate: 135 tests passing, 0 ruff findings
 Before any commit or review:
 ```bash
 python manage.py test --settings=settings_test -v 0   # must pass
@@ -88,12 +88,14 @@ Every session that modifies code MUST update MANIFEST.md, BUILD_LOG.md, and docs
 
 ## Current state (as of 2026-04-01)
 
-- **72 tests passing, 0 ruff findings**
+- **135 tests passing, 0 ruff findings**
 - 5 Django models: CallRecording, CallTranscript, ProviderScore, ComplianceFlag, OwnLLMScore
 - Migration 0001_initial applied
 - speech_provider.py implements GreyLabs (6 public functions)
 - Webhook receiver live at `/audit/webhook/provider/`
 - Ingestion service: `submit_pending_recordings()`, `process_provider_webhook()`, `check_compliance()`
+- **Ingestion pipeline live:** `sync_call_logs` command (daily sync from `uvarcl_live.call_logs` + `users` JOIN), `import_recordings` command (CSV/Excel upload), DRF import endpoint at `/audit/recordings/import/`
+- Shared ingestion logic in `ingestion.py`: dedup on `recording_url`, flexible datetime parsing, column name normalization
 - React scaffold (Vite + TS + Tailwind) with pages, types, API client, mock auth
 - AUDIT_AUTH_BACKEND=mock for dev, =crm for production
 
@@ -117,5 +119,6 @@ Every session that modifies code MUST update MANIFEST.md, BUILD_LOG.md, and docs
 | Prompt | What was built |
 |--------|---------------|
 | A | Full scaffold: 5 models, auth, crm_adapter, speech_provider, webhook, ingestion, serializers, views, React scaffold, 72 tests, docs |
+| B | Ingestion pipeline: sync_call_logs + import_recordings + DRF endpoint, 63 new tests (72→135) |
 
 Full details in `BUILD_LOG.md`.

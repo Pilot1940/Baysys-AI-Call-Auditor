@@ -5,4 +5,5 @@ psycopg2-binary>=2.9
 dj-database-url>=2.0
 requests>=2.31
 python-decouple>=3.8
+openpyxl>=3.1
 ruff>=0.4

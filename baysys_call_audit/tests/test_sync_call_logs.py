@@ -1,0 +1,180 @@
+"""Tests for the sync_call_logs management command."""
+from datetime import date, datetime, timedelta, timezone as dt_tz
+from io import StringIO
+from unittest.mock import MagicMock, patch
+
+from django.test import TestCase
+
+from baysys_call_audit.management.commands.sync_call_logs import Command, map_row_to_recording
+from baysys_call_audit.models import CallRecording
+
+
+def _make_db_row(
+    source_id=1, agent_id=101, agent_name="John Doe", agency_id=5,
+    customer_id=200, customer_number="+919876543210",
+    recording_s3_path="https://s3.example.com/rec1.mp3",
+    created_at=None, call_duration=120,
+    campaign_name="HDFC PL", loan_id="LN001",
+):
+    """Build a tuple matching COLUMN_NAMES order."""
+    if created_at is None:
+        created_at = datetime(2026, 3, 30, 10, 0, 0, tzinfo=dt_tz.utc)
+    return (
+        source_id, agent_id, agent_name, agency_id, customer_id,
+        customer_number, recording_s3_path, created_at, call_duration,
+        campaign_name, loan_id,
+    )
+
+
+class MapRowToRecordingTests(TestCase):
+    def test_basic_mapping(self):
+        from baysys_call_audit.management.commands.sync_call_logs import COLUMN_NAMES
+
+        db_row = _make_db_row()
+        row_dict = dict(zip(COLUMN_NAMES, db_row))
+        mapped = map_row_to_recording(row_dict)
+
+        self.assertEqual(mapped["agent_id"], "101")
+        self.assertEqual(mapped["agent_name"], "John Doe")
+        self.assertEqual(mapped["agency_id"], "5")
+        self.assertEqual(mapped["customer_id"], "200")
+        self.assertEqual(mapped["customer_phone"], "+919876543210")
+        self.assertEqual(mapped["recording_url"], "https://s3.example.com/rec1.mp3")
+        self.assertEqual(mapped["bank_name"], "HDFC PL")
+        self.assertEqual(mapped["portfolio_id"], "LN001")
+
+    def test_none_values_handled(self):
+        from baysys_call_audit.management.commands.sync_call_logs import COLUMN_NAMES
+
+        db_row = _make_db_row(customer_id=None, loan_id=None, agency_id=None)
+        row_dict = dict(zip(COLUMN_NAMES, db_row))
+        mapped = map_row_to_recording(row_dict)
+
+        self.assertIsNone(mapped["customer_id"])
+        self.assertIsNone(mapped["portfolio_id"])
+        self.assertIsNone(mapped["agency_id"])
+
+    def test_unknown_agent_name(self):
+        from baysys_call_audit.management.commands.sync_call_logs import COLUMN_NAMES
+
+        db_row = _make_db_row(agent_name="Unknown")
+        row_dict = dict(zip(COLUMN_NAMES, db_row))
+        mapped = map_row_to_recording(row_dict)
+        self.assertEqual(mapped["agent_name"], "Unknown")
+
+
+class SyncCallLogsCommandTests(TestCase):
+    """Tests for the sync_call_logs command using mocked DB cursor."""
+
+    def _run_command(self, *args, **kwargs):
+        out = StringIO()
+        cmd = Command(stdout=out, stderr=StringIO())
+        cmd.handle(*args, **kwargs)
+        return out.getvalue()
+
+    @patch("baysys_call_audit.management.commands.sync_call_logs.connection")
+    def test_default_date_is_yesterday(self, mock_conn):
+        cursor = MagicMock()
+        cursor.fetchmany.return_value = []
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+        self._run_command(date=None, batch_size=5000, dry_run=False)
+
+        yesterday = str(date.today() - timedelta(days=1))
+        cursor.execute.assert_called_once()
+        actual_date = cursor.execute.call_args[0][1][0]
+        self.assertEqual(actual_date, yesterday)
+
+    @patch("baysys_call_audit.management.commands.sync_call_logs.connection")
+    def test_custom_date(self, mock_conn):
+        cursor = MagicMock()
+        cursor.fetchmany.return_value = []
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+        self._run_command(date="2026-03-30", batch_size=5000, dry_run=False)
+
+        actual_date = cursor.execute.call_args[0][1][0]
+        self.assertEqual(actual_date, "2026-03-30")
+
+    @patch("baysys_call_audit.management.commands.sync_call_logs.connection")
+    def test_creates_recordings(self, mock_conn):
+        rows = [_make_db_row(source_id=i, recording_s3_path=f"https://s3.example.com/rec{i}.mp3")
+                for i in range(3)]
+        cursor = MagicMock()
+        cursor.fetchmany.side_effect = [rows, []]
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+        output = self._run_command(date="2026-03-30", batch_size=5000, dry_run=False)
+
+        self.assertEqual(CallRecording.objects.count(), 3)
+        self.assertIn("Created:            3", output)
+
+    @patch("baysys_call_audit.management.commands.sync_call_logs.connection")
+    def test_dedup_on_second_run(self, mock_conn):
+        rows = [_make_db_row()]
+        cursor = MagicMock()
+        cursor.fetchmany.side_effect = [rows, []]
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+        self._run_command(date="2026-03-30", batch_size=5000, dry_run=False)
+        self.assertEqual(CallRecording.objects.count(), 1)
+
+        # Second run with same data
+        cursor.fetchmany.side_effect = [rows, []]
+        output = self._run_command(date="2026-03-30", batch_size=5000, dry_run=False)
+
+        self.assertEqual(CallRecording.objects.count(), 1)
+        self.assertIn("Skipped (dedup):    1", output)
+
+    @patch("baysys_call_audit.management.commands.sync_call_logs.connection")
+    def test_dry_run_no_db_writes(self, mock_conn):
+        rows = [_make_db_row()]
+        cursor = MagicMock()
+        cursor.fetchmany.side_effect = [rows, []]
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+        output = self._run_command(date="2026-03-30", batch_size=5000, dry_run=True)
+
+        self.assertEqual(CallRecording.objects.count(), 0)
+        self.assertIn("[DRY RUN]", output)
+        self.assertIn("Created:            1", output)
+
+    @patch("baysys_call_audit.management.commands.sync_call_logs.connection")
+    def test_unknown_agent_counted(self, mock_conn):
+        rows = [_make_db_row(agent_name="Unknown")]
+        cursor = MagicMock()
+        cursor.fetchmany.side_effect = [rows, []]
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+        output = self._run_command(date="2026-03-30", batch_size=5000, dry_run=False)
+
+        self.assertIn("Unknown agents:     1", output)
+
+    @patch("baysys_call_audit.management.commands.sync_call_logs.connection")
+    def test_empty_result_set(self, mock_conn):
+        cursor = MagicMock()
+        cursor.fetchmany.return_value = []
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+        output = self._run_command(date="2026-03-30", batch_size=5000, dry_run=False)
+
+        self.assertEqual(CallRecording.objects.count(), 0)
+        self.assertIn("Fetched:            0", output)
+
+    @patch("baysys_call_audit.management.commands.sync_call_logs.connection")
+    def test_batch_size_passed_to_fetchmany(self, mock_conn):
+        cursor = MagicMock()
+        cursor.fetchmany.return_value = []
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+        self._run_command(date="2026-03-30", batch_size=100, dry_run=False)
+
+        cursor.fetchmany.assert_called_with(100)

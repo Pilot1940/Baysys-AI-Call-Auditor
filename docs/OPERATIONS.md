@@ -50,9 +50,74 @@ npm run dev
 
 ---
 
-## Running the Ingestion Pipeline
+## Populating CallRecording — Ingestion
 
-### Daily batch submission
+CallRecording is the analytical source of truth. Two ingestion paths:
+
+### Path 1: Daily sync from call_logs
+
+Reads `uvarcl_live.call_logs`, JOINs to `uvarcl_live.users` for agent name + agency, creates `CallRecording` rows with `status=pending`.
+
+```bash
+# Sync yesterday's calls (default)
+python manage.py sync_call_logs
+
+# Sync a specific date
+python manage.py sync_call_logs --date 2026-03-30
+
+# Custom batch size (default: 5000)
+python manage.py sync_call_logs --date 2026-03-30 --batch-size 10000
+
+# Dry run — count and validate, no DB writes
+python manage.py sync_call_logs --date 2026-03-30 --dry-run
+```
+
+**Output:** Summary showing fetched, created, skipped (dedup), skipped (invalid), unknown agents, errors.
+
+**Filters applied:** `recording_s3_path IS NOT NULL AND call_duration > 10`.
+
+**Dedup:** Safe to run twice for the same date — existing `recording_url` values are skipped.
+
+**Scheduling:** Run daily via cron after midnight:
+```cron
+15 0 * * * cd /path/to/project && python manage.py sync_call_logs
+```
+
+### Path 2: CSV/Excel upload (backfill)
+
+For the 200K historical backlog and ad-hoc imports.
+
+```bash
+# Import from CSV
+python manage.py import_recordings /path/to/recordings.csv
+
+# Import from Excel (specific sheet)
+python manage.py import_recordings /path/to/recordings.xlsx --sheet "Sheet1"
+
+# Dry run
+python manage.py import_recordings /path/to/recordings.csv --dry-run
+```
+
+**Required columns:** `agent_id`, `recording_url`, `recording_datetime`
+**Expected columns:** `agent_name` (defaults to "Unknown" if missing)
+**Optional columns:** `customer_id`, `portfolio_id`, `agency_id`, `customer_phone`, `product_type`, `bank_name`
+
+Column headers are case-insensitive and accept spaces, hyphens, or camelCase (e.g., "Agent ID", "agent_id", "agentId" all work).
+
+**API endpoint** (alternative to CLI):
+```
+POST /audit/recordings/import/
+Content-Type: multipart/form-data
+Body: file=<csv or xlsx>
+Query: ?dry_run=true (optional)
+
+Requires: Admin (role_id=1) or Manager/TL (role_id=2)
+```
+
+### Submitting to speech provider
+
+After ingestion, `CallRecording` rows are in `status=pending`. Submit them to the provider:
+
 ```python
 # In Django shell or management command:
 from baysys_call_audit.services import submit_pending_recordings
@@ -61,11 +126,6 @@ from baysys_call_audit.services import submit_pending_recordings
 result = submit_pending_recordings(batch_size=100)
 # Returns: {"submitted": N, "failed": N, "skipped": N}
 ```
-
-### Manual backfill
-1. Populate `CallRecording` rows with status=`pending` (via CSV upload, admin, or direct SQL)
-2. Run `submit_pending_recordings()` with desired batch size
-3. Provider processes async, results arrive via webhook
 
 ### Rate limiting
 - Provider rate limit: 200 requests/min
