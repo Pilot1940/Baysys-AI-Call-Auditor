@@ -22,12 +22,25 @@ class CallRecording(models.Model):
     portfolio_id = models.CharField(max_length=50, null=True, blank=True, db_index=True)
     supervisor_id = models.CharField(max_length=50, null=True, blank=True)
     agency_id = models.CharField(max_length=50, null=True, blank=True)
-    recording_url = models.URLField(max_length=2000)
+    recording_url = models.CharField(max_length=2000)  # raw S3 object key; signed at submission time
     recording_datetime = models.DateTimeField(db_index=True)
     customer_phone = models.CharField(max_length=20, null=True, blank=True)
     product_type = models.CharField(max_length=50, null=True, blank=True)
     bank_name = models.CharField(max_length=100, null=True, blank=True)
+    TIER_CHOICES = [
+        ("immediate", "Immediate"),
+        ("normal", "Normal"),
+        ("off_peak", "Off Peak"),
+    ]
+
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending", db_index=True)
+    submission_tier = models.CharField(
+        max_length=20,
+        choices=TIER_CHOICES,
+        default="normal",
+        db_index=True,
+        help_text="Submission priority tier: immediate > normal > off_peak",
+    )
     fatal_level = models.IntegerField(
         default=0,
         help_text="Computed severity 0-5 from provider boolean scores. 0 = not yet scored.",

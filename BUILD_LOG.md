@@ -3,7 +3,7 @@
 **Project:** BaySys Call Audit AI
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
 **Build start:** 2026-04-01
-**Last updated:** 2026-04-01 (Session 3)
+**Last updated:** 2026-04-01 (Session 5)
 **Build method:** Claude Code (Opus 4.6)
 
 ---
@@ -15,6 +15,8 @@
 | A | Full scaffold: Django + React + models + tests | 2026-04-01 | — |
 | B | Ingestion pipeline: call_logs sync + CSV upload | 2026-04-01 | #4, #5 |
 | C | Sync API + RBI COC compliance engine + fatal level | 2026-04-01 | #7 |
+| D | S3 URL re-signing + submission tier system | 2026-04-01 | #6 |
+| E | S3 raw key storage + IST timezone compliance | 2026-04-01 | #8, #9 |
 
 ---
 
@@ -179,3 +181,87 @@
 7. **Restricted keywords preserved in provider compliance** — carried over from the old engine as a hardcoded check alongside config-driven rules.
 
 ### Test count at end of session: 186 passing, 0 ruff findings
+
+---
+
+## Session 4 — Prompt D: S3 URL Re-signing + Submission Tier System
+
+**Date:** 2026-04-01
+**Scope:** Fix S3 URL expiry problem; add config-driven submission tier system (immediate/normal/off_peak).
+**Issues closed:** #6
+
+### Files created
+
+- `config/submission_priority.yaml` — tier assignment config: agency_ids, bank_names, product_types per tier
+- `baysys_call_audit/migrations/0003_callrecording_submission_tier.py` — adds `submission_tier` CharField
+- `baysys_call_audit/management/commands/submit_recordings.py` — submit pending recordings. Args: `--tier`, `--batch-size`, `--dry-run`
+- `baysys_call_audit/tests/test_submission_tiers.py` — 35 tests
+
+### Files modified
+
+- `baysys_call_audit/crm_adapter.py` — added `get_signed_url(s3_path)` (mock: returns path unchanged; prod: calls `arc.s3.service.s3_download()`)
+- `baysys_call_audit/models.py` — added `submission_tier` CharField(20, default=normal, db_index=True) with TIER_CHOICES
+- `baysys_call_audit/ingestion.py` — added `_load_submission_priority()` (lru_cache), `_tier_matches()`, `_determine_submission_tier()`; set `submission_tier` in `create_recording_from_row()`
+- `baysys_call_audit/services.py` — added `tiers` parameter to `submit_pending_recordings()`; added `get_signed_url()` call immediately before each provider submission with fallback to stored URL
+- `baysys_call_audit/tests/test_crm_adapter.py` — added 3 tests for `get_signed_url` in mock mode
+- `MANIFEST.md`, `BUILD_LOG.md`, `docs/OPERATIONS.md` — updated
+
+### Key decisions
+
+1. **Re-sign immediately before submission, never store** — `get_signed_url()` is called per-recording inside the submission loop. The `recording_url` in DB always holds the raw S3 path, never a signed URL.
+
+2. **Fallback on re-sign failure** — if `get_signed_url()` raises, log a warning and fall back to the stored URL. Submission is still attempted (may fail at provider, but doesn't block the batch).
+
+3. **Config-driven tier assignment at ingestion** — `_determine_submission_tier()` reads `config/submission_priority.yaml` via `_load_submission_priority()` (lru_cache). Config errors (missing file, malformed YAML) default to `normal` and log a warning — never fail ingestion.
+
+4. **OR logic within tier, immediate > off_peak > normal precedence** — a recording matches a tier if ANY rule matches. Tiers are checked in order: immediate first, then off_peak, else normal.
+
+5. **Integer vs string agency_id** — config stores `agency_ids` as integers; `CallRecording.agency_id` is CharField. `_tier_matches()` converts both sides to str before comparing.
+
+6. **submit_recordings command as thin wrapper** — delegates to `submit_pending_recordings()`. Supports `--tier` (repeatable), `--batch-size`, `--dry-run`.
+
+### Test count at end of session: 224 passing, 0 ruff findings
+
+---
+
+## Session 5 — Prompt E: S3 Raw Key Storage + IST Timezone Compliance
+
+**Date:** 2026-04-01
+**Scope:** Three bugs found during live DB validation against `uvarcl_live.call_logs`.
+**Issues closed:** #8 (recording_url field type), #9 (IST timezone in compliance)
+
+### Files created
+
+- `baysys_call_audit/migrations/0004_recording_url_charfield.py` — AlterField recording_url URLField → CharField
+
+### Files modified
+
+- `baysys_call_audit/models.py` — `recording_url`: `URLField` → `CharField`. S3 object keys have no URL scheme.
+- `baysys_call_audit/ingestion.py` — `validate_row()`: removed URL format check, non-empty only. `SYNC_QUERY` + `SYNC_COLUMN_NAMES` + `map_sync_row()`: `created_at` → `call_start_time`.
+- `baysys_call_audit/compliance.py` — added `_IST = ZoneInfo("Asia/Kolkata")`; all four metadata handlers now convert `recording_datetime` (UTC) to IST before extracting hour/weekday/date.
+- `baysys_call_audit/tests/test_models.py` — 2 new tests: raw S3 key saves without error, round-trip unchanged
+- `baysys_call_audit/tests/test_ingestion.py` — updated `test_bad_url_prefix` → accepts any non-empty path; added 5 new tests (raw S3 key, SYNC_QUERY strings, map_sync_row)
+- `baysys_call_audit/tests/test_compliance.py` — updated 2 call_window tests (now use UTC times matching IST window boundary); added 9 IST-aware tests (call window, blocked weekday, gazette holiday)
+- `baysys_call_audit/tests/test_sync_call_logs.py` — renamed `created_at` → `call_start_time` in `_make_db_row()`
+- `MANIFEST.md`, `BUILD_LOG.md`, `CLAUDE.md`, `docs/OPERATIONS.md` — updated
+
+### Bug source
+
+Live DB validation against `uvarcl_live.call_logs` revealed:
+1. `recording_s3_path` stores raw S3 object keys (no `http://` prefix) — URLField rejected them
+2. All compliance time checks were UTC-based; RBI rules are IST (+5:30) → 23% of calls misclassified
+3. `created_at` is DB insert timestamp (erratic); `call_start_time` is actual call start (reliable)
+
+### Key decisions
+
+1. **CharField not URLField** — S3 object keys like `Konex/recordings/call.mp3` have no URL scheme. Validation is non-empty only. Signing happens at submission time.
+
+2. **`_IST` module-level constant** — `ZoneInfo("Asia/Kolkata")` computed once, reused in all four compliance handlers. Python 3.9+ stdlib, no new dependency.
+
+3. **UTC stored, IST for compliance** — `recording_datetime` stays as UTC in the DB. All four metadata handlers call `.astimezone(_IST)` at check time. No DB schema change.
+
+4. **`call_start_time` not `created_at`** — filter, sort, and `recording_datetime` mapping all use `call_start_time`. No `created_at` in SYNC_QUERY.
+
+5. **Existing tests updated** — `CallWindowTests` tests adjusted to use UTC times that correctly map to the intended IST hours. `test_sync_call_logs.py` helper renamed to reflect the column change.
+
+### Test count at end of session: 241 passing, 0 ruff findings

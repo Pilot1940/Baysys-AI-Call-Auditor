@@ -56,7 +56,7 @@ All interaction with the speech analytics provider goes through `speech_provider
 ### 2. `crm_adapter.py` is the single mock/prod seam
 Same pattern as Trainer. `AUDIT_AUTH_BACKEND=mock` in dev, `=crm` in prod. All CRM imports inside function bodies only with `# noqa: PLC0415`.
 
-### 3. Test gate: 186 tests passing, 0 ruff findings
+### 3. Test gate: 241 tests passing, 0 ruff findings
 Before any commit or review:
 ```bash
 python manage.py test --settings=settings_test -v 0   # must pass
@@ -88,18 +88,23 @@ Every session that modifies code MUST update MANIFEST.md, BUILD_LOG.md, and docs
 
 ## Current state (as of 2026-04-01)
 
-- **186 tests passing, 0 ruff findings**
+- **241 tests passing, 0 ruff findings**
 - 5 Django models: CallRecording, CallTranscript, ProviderScore, ComplianceFlag, OwnLLMScore
-- Migration 0001_initial applied
+- Migrations 0001–0004 applied
+- **Dev Supabase fully configured:** `uvarcl_live.call_logs` (500K rows), `uvarcl_live.users` (662 rows, anonymised), `baysys_call_audit.*` all 5 tables created. Sync can be run end-to-end against Supabase with no RDS connection needed.
 - speech_provider.py implements GreyLabs (6 public functions)
 - Webhook receiver live at `/audit/webhook/provider/`
-- Ingestion service: `submit_pending_recordings()`, `process_provider_webhook()`, `check_compliance()`
+- Ingestion service: `submit_pending_recordings()`, `process_provider_webhook()`, `run_own_llm_scoring()` (placeholder)
 - **Ingestion pipeline live:** `sync_call_logs` command (daily sync from `uvarcl_live.call_logs` + `users` JOIN), `import_recordings` command (CSV/Excel upload), DRF import endpoint at `/audit/recordings/import/`
 - Shared ingestion logic in `ingestion.py`: dedup on `recording_url`, flexible datetime parsing, column name normalization
 - **Config-driven compliance engine** in `compliance.py`: 4 metadata rules + 3 provider rules from `config/compliance_rules.yaml`
 - **Fatal level system**: weighted boolean scoring from `config/fatal_level_rules.yaml`, stored on `CallRecording.fatal_level` (0-5)
 - **Sync API endpoint** at `/audit/recordings/sync/` (Admin/Supervisor only) — failsafe trigger for daily sync
-- Migration 0002: `fatal_level` field on CallRecording
+- **S3 URL re-signing**: `crm_adapter.get_signed_url()` called immediately before each provider submission (never stored)
+- **Submission tier system**: `submission_tier` field (immediate/normal/off_peak) assigned at ingestion via `config/submission_priority.yaml`; `submit_recordings` command with `--tier`, `--batch-size`, `--dry-run`
+- **`recording_url` is CharField**: raw S3 object key, no URL scheme. Signed at submission time via `crm_adapter.get_signed_url()`
+- **IST compliance**: all metadata rule time/date checks convert UTC → IST (`_IST = ZoneInfo("Asia/Kolkata")`) before comparison
+- **SYNC_QUERY uses `call_start_time`**: actual call start (not `created_at` insert timestamp)
 - React scaffold (Vite + TS + Tailwind) with pages, types, API client, mock auth
 - AUDIT_AUTH_BACKEND=mock for dev, =crm for production
 
@@ -123,6 +128,10 @@ Every session that modifies code MUST update MANIFEST.md, BUILD_LOG.md, and docs
 | Prompt | What was built |
 |--------|---------------|
 | A | Full scaffold: 5 models, auth, crm_adapter, speech_provider, webhook, ingestion, serializers, views, React scaffold, 72 tests, docs |
+| B | Ingestion pipeline: sync_call_logs command, import_recordings command, DRF import endpoint, 63 new tests |
+| C | Sync API endpoint, config-driven compliance engine (YAML), fatal level weighted scoring, 51 new tests |
+| D | S3 URL re-signing (get_signed_url in crm_adapter), submission_tier field + migration, config/submission_priority.yaml, submit_recordings command, 38 new tests |
+| E | recording_url URLField→CharField, validate_row URL check removed, SYNC_QUERY→call_start_time, IST compliance conversion, migration 0004, 17 new tests |
 | B | Ingestion pipeline: sync_call_logs + import_recordings + DRF endpoint, 63 new tests (72→135) |
 | C | Sync API + RBI COC compliance engine + fatal level, 51 new tests (135→186) |
 

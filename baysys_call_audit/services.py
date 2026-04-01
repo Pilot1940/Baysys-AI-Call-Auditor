@@ -15,6 +15,7 @@ from django.utils import timezone
 
 from . import speech_provider
 from .compliance import check_provider_compliance, compute_fatal_level
+from .crm_adapter import get_signed_url
 from .models import (
     CallRecording,
     CallTranscript,
@@ -29,15 +30,29 @@ logger = logging.getLogger(__name__)
 # Ingestion: submit pending recordings to provider
 # ─────────────────────────────────────────────────────────────────────────────
 
-def submit_pending_recordings(batch_size: int = 100) -> dict:
+def submit_pending_recordings(
+    batch_size: int = 100,
+    tiers: list[str] | None = None,
+) -> dict:
     """
     Query CallRecording where status=pending, submit to speech provider.
+
+    Args:
+        batch_size: Maximum recordings to process in this call.
+        tiers: Optional list of submission_tier values to filter by
+               (e.g. ["immediate"] or ["normal", "off_peak"]).
+               If None, all tiers are included.
+
     Updates status to 'submitted' on success, 'failed' on error.
+    Re-signs the S3 URL immediately before each submission (URLs expire in 10-15 min).
 
     Returns:
         {"submitted": int, "failed": int, "skipped": int}
     """
-    pending = CallRecording.objects.filter(status="pending").order_by("created_at")[:batch_size]
+    qs = CallRecording.objects.filter(status="pending")
+    if tiers:
+        qs = qs.filter(submission_tier__in=tiers)
+    pending = qs.order_by("created_at")[:batch_size]
 
     template_id = settings.SPEECH_PROVIDER_TEMPLATE_ID
     callback_url = settings.SPEECH_PROVIDER_CALLBACK_URL
@@ -53,8 +68,15 @@ def submit_pending_recordings(batch_size: int = 100) -> dict:
             continue
 
         try:
+            # Re-sign URL immediately before submission — stored URL may have expired
+            try:
+                signed_url = get_signed_url(recording.recording_url)
+            except Exception as exc:
+                logger.warning("Failed to re-sign URL for recording %s: %s", recording.pk, exc)
+                signed_url = recording.recording_url
+
             resource_id = speech_provider.submit_recording(
-                resource_url=recording.recording_url,
+                resource_url=signed_url,
                 template_id=template_id,
                 agent_id=recording.agent_id,
                 agent_name=recording.agent_name,

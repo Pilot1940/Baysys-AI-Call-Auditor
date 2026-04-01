@@ -1,0 +1,35 @@
+# Submission Priority Configuration
+# Tier assignment is determined at ingestion time (in create_recording_from_row).
+# Tiers: immediate > off_peak > normal (normal is the catch-all default).
+#
+# Matching rules (OR logic within a tier, checked top-to-bottom):
+#   agency_ids   — exact match on CallRecording.agency_id (compare as str)
+#   bank_names   — substring match on CallRecording.bank_name (case-insensitive)
+#   product_types — exact match on CallRecording.product_type (case-insensitive)
+#
+# To disable a tier rule: set its lists to empty ([]).
+# A recording matches the first tier whose ANY rule matches.
+# Precedence: immediate checked first, then off_peak; else normal.
+
+version: "1.0"
+last_updated: "2026-04-01"
+updated_by: "PC Chitalkar"
+
+tiers:
+  immediate:
+    # High-priority agencies (e.g. VIP clients, regulators)
+    agency_ids: []
+    # High-priority bank portfolios (substring match)
+    bank_names: []
+    # High-priority product types
+    product_types: []
+
+  off_peak:
+    # Agencies where recordings can wait for off-peak processing
+    agency_ids: []
+    # Portfolios suitable for off-peak processing
+    bank_names: []
+    # Product types for off-peak
+    product_types: []
+
+  # normal: all recordings not matched above default to normal

@@ -6,6 +6,43 @@ BaySys Call Audit AI is a call monitoring system that processes recorded MP3 cal
 
 ---
 
+## Dev Supabase Instance (Pre-populated)
+
+A dev Supabase instance is pre-configured for development and testing — no cross-DB connections to source RDS required.
+
+**Instance:** Same Supabase project as Voice Trainer (`DATABASE_URL` in `.env`)
+
+**What's loaded:**
+
+| Schema | Table | Rows | Notes |
+|--------|-------|------|-------|
+| `uvarcl_live` | `call_logs` | 500,000 | Most recent 500K rows ordered by `call_start_time DESC`. Raw S3 object keys in `recording_s3_path`. |
+| `uvarcl_live` | `users` | 662 | All agents/supervisors. Credentials anonymised (`dev_{id}@dev.local`). Name + `agency_id` intact for JOIN. |
+| `baysys_call_audit` | `call_recordings` | 99,998 | First 100K synced sample (2026-03-20 → 2026-03-31). All `status=pending`. |
+| `baysys_call_audit` | `call_transcripts` | 0 | Empty — awaiting GreyLabs UAT key |
+| `baysys_call_audit` | `provider_scores` | 0 | Empty — awaiting GreyLabs UAT key |
+| `baysys_call_audit` | `compliance_flags` | 0 | Empty — populated by sync |
+| `baysys_call_audit` | `own_llm_scores` | 0 | Empty — future prompt |
+
+**Key facts about the loaded data:**
+- `uvarcl_live.call_logs` date range: approx 2026-03-01 → 2026-03-31
+- `users` table is the CRM agent table (plural) — not Django's `auth_user` (singular). The JOIN is `call_logs.agent_id = users.user_id`.
+- 276 distinct agents, 43,043 distinct customers in `call_recordings`
+- `recording_s3_path` format: raw S3 object key e.g. `Rezolution/call_recordings/2026/03/31/call.mp3` — no http:// prefix. This is expected.
+
+**To test sync against dev Supabase:**
+```bash
+# Sync a date that exists in the loaded call_logs data
+python manage.py sync_call_logs --date 2026-03-31 --dry-run
+
+# Actual sync
+python manage.py sync_call_logs --date 2026-03-31
+```
+
+Django connects to Supabase (`DATABASE_URL`). The sync query reads from `uvarcl_live.call_logs` and writes to `baysys_call_audit.call_recordings` — all within the same Supabase instance.
+
+---
+
 ## Running the System Locally
 
 ### 1. Prerequisites
@@ -135,15 +172,66 @@ Response: {"status": "ok", "date": "...", "created": N, ...}
 
 ### Submitting to speech provider
 
-After ingestion, `CallRecording` rows are in `status=pending`. Submit them to the provider:
+After ingestion, `CallRecording` rows are in `status=pending`. Submit them using the management command:
+
+```bash
+# Submit up to 100 pending recordings (all tiers)
+python manage.py submit_recordings
+
+# Submit only immediate-tier recordings
+python manage.py submit_recordings --tier immediate
+
+# Submit normal + off_peak (not immediate)
+python manage.py submit_recordings --tier normal --tier off_peak
+
+# Custom batch size
+python manage.py submit_recordings --batch-size 500
+
+# Dry run — count pending without submitting
+python manage.py submit_recordings --dry-run
+python manage.py submit_recordings --tier immediate --dry-run
+```
+
+Or call directly from Python:
 
 ```python
-# In Django shell or management command:
 from baysys_call_audit.services import submit_pending_recordings
 
-# Submit up to 100 pending recordings
+# Submit up to 100 pending recordings (all tiers)
 result = submit_pending_recordings(batch_size=100)
+
+# Submit only immediate-tier recordings
+result = submit_pending_recordings(batch_size=100, tiers=["immediate"])
+
 # Returns: {"submitted": N, "failed": N, "skipped": N}
+```
+
+**S3 URL re-signing:** Pre-signed S3 URLs expire in 10–15 minutes, but the submission batch takes ~90 minutes at 200/min. The service calls `crm_adapter.get_signed_url()` immediately before each provider API call to get a fresh URL. The stored `recording_url` is never overwritten.
+
+### Submission tiers
+
+Recordings are assigned a `submission_tier` at ingestion time:
+- `immediate` — highest priority (VIP clients, regulatory accounts)
+- `normal` — standard priority (default)
+- `off_peak` — lowest priority (backfill, archival)
+
+Tier assignment is config-driven via `config/submission_priority.yaml`. Matching uses OR logic within each tier:
+- `agency_ids`: exact match on `agency_id`
+- `bank_names`: substring match on `bank_name` (case-insensitive)
+- `product_types`: exact match on `product_type` (case-insensitive)
+
+Precedence: `immediate` > `off_peak` > `normal`. If no rule matches, tier defaults to `normal`.
+
+**Recommended cron schedule (tier-based):**
+```cron
+# Immediate tier — run every 15 minutes
+*/15 * * * * cd /path/to/project && python manage.py submit_recordings --tier immediate --batch-size 200
+
+# Normal tier — run hourly
+0 * * * * cd /path/to/project && python manage.py submit_recordings --tier normal --batch-size 1000
+
+# Off-peak tier — run once at night
+0 2 * * * cd /path/to/project && python manage.py submit_recordings --tier off_peak --batch-size 5000
 ```
 
 ### Rate limiting
@@ -247,6 +335,8 @@ Rules are config-driven. Two categories:
   - `P1 fatal_level_threshold`: Fatal level >= threshold
   - `P2 provider_score_threshold`: Compliance score below threshold
   - `P3 provider_transcript_field`: Negative customer sentiment
+
+**Timezone:** All compliance time/date checks (call window, blocked weekday, gazette holiday, max calls per customer) use **IST (Asia/Kolkata, UTC+5:30)**. `recording_datetime` is stored in UTC; conversion to IST happens in `compliance.py` at check time. No ops action needed — this is automatic.
 
 **To add/modify rules:** Edit `config/compliance_rules.yaml`. Adding a rule of an existing `check_type` requires no code changes.
 

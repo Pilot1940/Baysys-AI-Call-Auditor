@@ -85,9 +85,10 @@ class CallWindowTests(TestCase):
 
     @patch("baysys_call_audit.compliance.load_compliance_rules")
     @override_settings(COMPLIANCE_CALL_WINDOW_START_HOUR=8, COMPLIANCE_CALL_WINDOW_END_HOUR=20)
-    def test_call_at_7am_creates_flag(self, mock_rules):
+    def test_call_at_1am_utc_creates_flag(self, mock_rules):
+        # 1:00am UTC = 6:30am IST — before 8am IST window start → flagged
         mock_rules.return_value = self.RULES
-        r = _make_recording(recording_datetime=datetime(2026, 4, 1, 7, 0, tzinfo=tz.utc))
+        r = _make_recording(recording_datetime=datetime(2026, 4, 1, 1, 0, tzinfo=tz.utc))
         flags = check_metadata_compliance(r)
         self.assertEqual(len(flags), 1)
         self.assertEqual(flags[0].severity, "critical")
@@ -96,6 +97,7 @@ class CallWindowTests(TestCase):
     @patch("baysys_call_audit.compliance.load_compliance_rules")
     @override_settings(COMPLIANCE_CALL_WINDOW_START_HOUR=8, COMPLIANCE_CALL_WINDOW_END_HOUR=20)
     def test_call_at_10am_no_flag(self, mock_rules):
+        # 10:00am UTC = 3:30pm IST — within 8am-8pm window → no flag
         mock_rules.return_value = self.RULES
         r = _make_recording(recording_datetime=datetime(2026, 4, 1, 10, 0, tzinfo=tz.utc))
         flags = check_metadata_compliance(r)
@@ -104,18 +106,69 @@ class CallWindowTests(TestCase):
 
     @patch("baysys_call_audit.compliance.load_compliance_rules")
     @override_settings(COMPLIANCE_CALL_WINDOW_START_HOUR=8, COMPLIANCE_CALL_WINDOW_END_HOUR=20)
-    def test_call_at_21_creates_flag(self, mock_rules):
+    def test_call_at_16_utc_creates_flag(self, mock_rules):
+        # 16:00 UTC = 9:30pm IST — after 8pm IST window end → flagged
         mock_rules.return_value = self.RULES
-        r = _make_recording(recording_datetime=datetime(2026, 4, 1, 21, 0, tzinfo=tz.utc))
+        r = _make_recording(recording_datetime=datetime(2026, 4, 1, 16, 0, tzinfo=tz.utc))
         flags = check_metadata_compliance(r)
         self.assertTrue(any(f.flag_type == "outside_hours" for f in flags))
 
     @patch("baysys_call_audit.compliance.load_compliance_rules")
     @override_settings(COMPLIANCE_CALL_WINDOW_START_HOUR=9, COMPLIANCE_CALL_WINDOW_END_HOUR=19)
     def test_custom_window_via_settings(self, mock_rules):
+        # 2:30am UTC = 8:00am IST — outside custom 9am-7pm window → flagged
         mock_rules.return_value = self.RULES
-        # 8am should be outside with 9-19 window
-        r = _make_recording(recording_datetime=datetime(2026, 4, 1, 8, 0, tzinfo=tz.utc))
+        r = _make_recording(recording_datetime=datetime(2026, 4, 1, 2, 30, tzinfo=tz.utc))
+        flags = check_metadata_compliance(r)
+        self.assertTrue(any(f.flag_type == "outside_hours" for f in flags))
+
+    # ── IST-aware call window tests ──────────────────────────────────────────
+
+    @patch("baysys_call_audit.compliance.load_compliance_rules")
+    @override_settings(COMPLIANCE_CALL_WINDOW_START_HOUR=8, COMPLIANCE_CALL_WINDOW_END_HOUR=20)
+    def test_8am_ist_boundary_no_flag(self, mock_rules):
+        # 2:30am UTC = 8:00am IST — exactly at window start → compliant
+        mock_rules.return_value = self.RULES
+        r = _make_recording(recording_datetime=datetime(2026, 4, 1, 2, 30, tzinfo=tz.utc))
+        flags = check_metadata_compliance(r)
+        window_flags = [f for f in flags if f.flag_type == "outside_hours"]
+        self.assertEqual(len(window_flags), 0)
+
+    @patch("baysys_call_audit.compliance.load_compliance_rules")
+    @override_settings(COMPLIANCE_CALL_WINDOW_START_HOUR=8, COMPLIANCE_CALL_WINDOW_END_HOUR=20)
+    def test_8_30am_ist_no_flag(self, mock_rules):
+        # 3:00am UTC = 8:30am IST — within window → no flag (previously incorrectly flagged)
+        mock_rules.return_value = self.RULES
+        r = _make_recording(recording_datetime=datetime(2026, 4, 1, 3, 0, tzinfo=tz.utc))
+        flags = check_metadata_compliance(r)
+        window_flags = [f for f in flags if f.flag_type == "outside_hours"]
+        self.assertEqual(len(window_flags), 0)
+
+    @patch("baysys_call_audit.compliance.load_compliance_rules")
+    @override_settings(COMPLIANCE_CALL_WINDOW_START_HOUR=8, COMPLIANCE_CALL_WINDOW_END_HOUR=20)
+    def test_7_59pm_ist_no_flag(self, mock_rules):
+        # 14:29 UTC = 7:59pm IST — still within window → no flag
+        mock_rules.return_value = self.RULES
+        r = _make_recording(recording_datetime=datetime(2026, 4, 1, 14, 29, tzinfo=tz.utc))
+        flags = check_metadata_compliance(r)
+        window_flags = [f for f in flags if f.flag_type == "outside_hours"]
+        self.assertEqual(len(window_flags), 0)
+
+    @patch("baysys_call_audit.compliance.load_compliance_rules")
+    @override_settings(COMPLIANCE_CALL_WINDOW_START_HOUR=8, COMPLIANCE_CALL_WINDOW_END_HOUR=20)
+    def test_8pm_ist_creates_flag(self, mock_rules):
+        # 14:30 UTC = 8:00pm IST — end of window (exclusive) → flagged
+        mock_rules.return_value = self.RULES
+        r = _make_recording(recording_datetime=datetime(2026, 4, 1, 14, 30, tzinfo=tz.utc))
+        flags = check_metadata_compliance(r)
+        self.assertTrue(any(f.flag_type == "outside_hours" for f in flags))
+
+    @patch("baysys_call_audit.compliance.load_compliance_rules")
+    @override_settings(COMPLIANCE_CALL_WINDOW_START_HOUR=8, COMPLIANCE_CALL_WINDOW_END_HOUR=20)
+    def test_9_30pm_ist_creates_flag(self, mock_rules):
+        # 16:00 UTC = 9:30pm IST — after window end → flagged (previously missed by UTC engine)
+        mock_rules.return_value = self.RULES
+        r = _make_recording(recording_datetime=datetime(2026, 4, 1, 16, 0, tzinfo=tz.utc))
         flags = check_metadata_compliance(r)
         self.assertTrue(any(f.flag_type == "outside_hours" for f in flags))
 
@@ -162,6 +215,26 @@ class BlockedWeekdayTests(TestCase):
         flags = check_metadata_compliance(r)
         self.assertEqual(len(flags), 0)
 
+    # ── IST-aware weekday tests ──────────────────────────────────────────────
+
+    @patch("baysys_call_audit.compliance.load_compliance_rules")
+    def test_saturday_11pm_utc_is_sunday_ist(self, mock_rules):
+        # 2026-04-04 23:00 UTC = 2026-04-05 04:30 IST → Sunday IST → flagged
+        # Old UTC code: weekday() = 5 (Saturday) → missed
+        mock_rules.return_value = self.RULES
+        r = _make_recording(recording_datetime=datetime(2026, 4, 4, 23, 0, tzinfo=tz.utc))
+        flags = check_metadata_compliance(r)
+        self.assertEqual(len(flags), 1)
+        self.assertEqual(flags[0].flag_type, "rbi_coc_violation")
+
+    @patch("baysys_call_audit.compliance.load_compliance_rules")
+    def test_sunday_10am_utc_is_sunday_ist(self, mock_rules):
+        # 2026-04-05 10:00 UTC = 2026-04-05 15:30 IST → Sunday both → flagged
+        mock_rules.return_value = self.RULES
+        r = _make_recording(recording_datetime=datetime(2026, 4, 5, 10, 0, tzinfo=tz.utc))
+        flags = check_metadata_compliance(r)
+        self.assertEqual(len(flags), 1)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Metadata rules: gazette_holiday
@@ -194,6 +267,28 @@ class GazetteHolidayTests(TestCase):
         r = _make_recording(recording_datetime=datetime(2026, 4, 1, 10, 0, tzinfo=tz.utc))
         flags = check_metadata_compliance(r)
         self.assertEqual(len(flags), 0)
+
+    # ── IST-aware holiday tests ──────────────────────────────────────────────
+
+    @patch("baysys_call_audit.compliance.load_compliance_rules")
+    def test_night_before_holiday_utc_is_holiday_ist(self, mock_rules):
+        # 2026-01-25 23:00 UTC = 2026-01-26 04:30 IST → Republic Day IST → flagged
+        # Old UTC code: date() = 2026-01-25 → not a holiday → missed
+        mock_rules.return_value = self.RULES
+        load_gazette_holidays.cache_clear()
+        r = _make_recording(recording_datetime=datetime(2026, 1, 25, 23, 0, tzinfo=tz.utc))
+        flags = check_metadata_compliance(r)
+        self.assertEqual(len(flags), 1)
+        self.assertIn("2026-01-26", flags[0].description)
+
+    @patch("baysys_call_audit.compliance.load_compliance_rules")
+    def test_holiday_morning_utc_is_holiday_ist(self, mock_rules):
+        # 2026-01-26 10:00 UTC = 2026-01-26 15:30 IST → Republic Day → flagged (still correct)
+        mock_rules.return_value = self.RULES
+        load_gazette_holidays.cache_clear()
+        r = _make_recording(recording_datetime=datetime(2026, 1, 26, 10, 0, tzinfo=tz.utc))
+        flags = check_metadata_compliance(r)
+        self.assertEqual(len(flags), 1)
 
     @patch("baysys_call_audit.compliance.load_compliance_rules")
     def test_missing_holidays_file_no_flag(self, mock_rules):

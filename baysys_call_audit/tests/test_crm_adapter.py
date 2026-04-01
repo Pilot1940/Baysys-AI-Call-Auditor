@@ -4,6 +4,7 @@ from django.test import TestCase, override_settings
 from baysys_call_audit.crm_adapter import (
     get_agency_list,
     get_auth_backend_name,
+    get_signed_url,
     get_team_users,
     get_user_agency_id,
     get_user_names,
@@ -45,3 +46,14 @@ class CrmAdapterMockTests(TestCase):
     def test_get_user_names_empty(self):
         names = get_user_names([])
         self.assertEqual(names, {})
+
+    def test_get_signed_url_mock_returns_unchanged(self):
+        path = "s3://mybucket/recordings/call_001.mp3"
+        self.assertEqual(get_signed_url(path), path)
+
+    def test_get_signed_url_mock_http_url_unchanged(self):
+        url = "https://s3.amazonaws.com/mybucket/call.mp3?X-Amz-Expires=900"
+        self.assertEqual(get_signed_url(url), url)
+
+    def test_get_signed_url_mock_empty_string(self):
+        self.assertEqual(get_signed_url(""), "")

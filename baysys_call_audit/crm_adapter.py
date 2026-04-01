@@ -95,6 +95,21 @@ def get_agency_list() -> list[dict]:
     )
 
 
+def get_signed_url(s3_path: str) -> str:
+    """
+    Return a fresh pre-signed URL for the given S3 path.
+    Mock: returns s3_path unchanged (safe for dev/test).
+    Prod: calls arc.s3.service.s3_download() to generate a short-lived signed URL.
+
+    Called immediately before each provider submission — never stored.
+    """
+    if get_auth_backend_name() == "mock":
+        return s3_path
+
+    from arc.s3.service import s3_download  # noqa: PLC0415
+    return s3_download(s3_path)
+
+
 def get_user_names(user_ids: list[int]) -> dict[int, str]:
     """
     Map user_ids -> display name ('First Last').

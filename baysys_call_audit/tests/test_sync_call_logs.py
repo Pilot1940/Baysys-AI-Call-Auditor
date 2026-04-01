@@ -14,15 +14,15 @@ def _make_db_row(
     source_id=1, agent_id=101, agent_name="John Doe", agency_id=5,
     customer_id=200, customer_number="+919876543210",
     recording_s3_path="https://s3.example.com/rec1.mp3",
-    created_at=None, call_duration=120,
+    call_start_time=None, call_duration=120,
     campaign_name="HDFC PL", loan_id="LN001",
 ):
     """Build a tuple matching SYNC_COLUMN_NAMES order."""
-    if created_at is None:
-        created_at = datetime(2026, 3, 30, 10, 0, 0, tzinfo=dt_tz.utc)
+    if call_start_time is None:
+        call_start_time = datetime(2026, 3, 30, 10, 0, 0, tzinfo=dt_tz.utc)
     return (
         source_id, agent_id, agent_name, agency_id, customer_id,
-        customer_number, recording_s3_path, created_at, call_duration,
+        customer_number, recording_s3_path, call_start_time, call_duration,
         campaign_name, loan_id,
     )
 

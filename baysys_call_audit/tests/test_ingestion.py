@@ -4,7 +4,10 @@ from datetime import datetime, timezone as dt_tz
 from django.test import TestCase
 
 from baysys_call_audit.ingestion import (
+    SYNC_COLUMN_NAMES,
+    SYNC_QUERY,
     create_recording_from_row,
+    map_sync_row,
     normalize_column_name,
     parse_datetime_flexible,
     validate_row,
@@ -40,11 +43,17 @@ class ValidateRowTests(TestCase):
         errors = validate_row(_valid_row(recording_url=None))
         self.assertTrue(any("recording_url" in e for e in errors))
 
-    def test_bad_url_prefix(self):
-        errors = validate_row(_valid_row(recording_url="ftp://bad.com/file.mp3"))
-        self.assertTrue(any("does not look like a URL" in e for e in errors))
+    def test_raw_s3_key_accepted(self):
+        # Raw S3 object key (no scheme) — now accepted; signing happens at submission time
+        errors = validate_row(_valid_row(recording_url="Konex/call_recordings/2026/03/31/call.mp3"))
+        self.assertEqual(errors, [])
 
-    def test_s3_url_accepted(self):
+    def test_ftp_url_accepted(self):
+        # No URL format validation — any non-empty path accepted
+        errors = validate_row(_valid_row(recording_url="ftp://bad.com/file.mp3"))
+        self.assertEqual(errors, [])
+
+    def test_s3_scheme_url_accepted(self):
         errors = validate_row(_valid_row(recording_url="s3://bucket/key.mp3"))
         self.assertEqual(errors, [])
 
@@ -186,3 +195,30 @@ class CreateRecordingFromRowTests(TestCase):
         recording, created = create_recording_from_row(row)
         self.assertTrue(created)
         self.assertEqual(recording.recording_datetime, dt)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SYNC_QUERY and map_sync_row: call_start_time
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SyncQueryCallStartTimeTests(TestCase):
+    def test_sync_query_uses_call_start_time(self):
+        self.assertIn("call_start_time", SYNC_QUERY)
+
+    def test_sync_query_not_created_at(self):
+        self.assertNotIn("created_at", SYNC_QUERY)
+
+    def test_sync_column_names_has_call_start_time(self):
+        self.assertIn("call_start_time", SYNC_COLUMN_NAMES)
+
+    def test_sync_column_names_not_created_at(self):
+        self.assertNotIn("created_at", SYNC_COLUMN_NAMES)
+
+    def test_map_sync_row_maps_call_start_time_to_recording_datetime(self):
+        dt = datetime(2026, 3, 30, 10, 0, 0, tzinfo=dt_tz.utc)
+        row_dict = dict.fromkeys(SYNC_COLUMN_NAMES, None)
+        row_dict["call_start_time"] = dt
+        row_dict["agent_id"] = 101
+        row_dict["agent_name"] = "Test Agent"
+        mapped = map_sync_row(row_dict)
+        self.assertEqual(mapped["recording_datetime"], dt)

@@ -44,6 +44,19 @@ class CallRecordingModelTests(TestCase):
         with self.assertRaises(Exception):
             _make_recording(provider_resource_id="RES-001")
 
+    def test_raw_s3_key_saves_without_error(self):
+        # recording_url is CharField — accepts raw S3 object keys (no URL scheme required)
+        raw_key = "Konex/call_recordings/2026/03/31/call_abc.mp3"
+        r = _make_recording(recording_url=raw_key)
+        self.assertEqual(r.recording_url, raw_key)
+
+    def test_raw_s3_key_round_trip(self):
+        # Saves and retrieves unchanged — no URL normalisation applied
+        raw_key = "Rezolution/call_recordings/2026/03/31/xxxxxx_agent_2026-03-31.mp3"
+        r = _make_recording(recording_url=raw_key)
+        r.refresh_from_db()
+        self.assertEqual(r.recording_url, raw_key)
+
     def test_nullable_fields(self):
         r = _make_recording()
         self.assertIsNone(r.customer_id)

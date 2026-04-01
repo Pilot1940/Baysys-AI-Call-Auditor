@@ -21,6 +21,7 @@ import logging
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import yaml
 from django.conf import settings
@@ -30,6 +31,10 @@ from .models import CallRecording, ComplianceFlag
 logger = logging.getLogger(__name__)
 
 _BASE_DIR = Path(settings.BASE_DIR)
+
+# India Standard Time — all RBI COC compliance time/date checks use IST.
+# recording_datetime is stored as UTC; convert at check time.
+_IST = ZoneInfo("Asia/Kolkata")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -139,7 +144,8 @@ def _check_call_window(recording: CallRecording, rule: dict) -> ComplianceFlag |
     start_hour = getattr(settings, "COMPLIANCE_CALL_WINDOW_START_HOUR", params.get("start_hour", 8))
     end_hour = getattr(settings, "COMPLIANCE_CALL_WINDOW_END_HOUR", params.get("end_hour", 20))
 
-    call_hour = recording.recording_datetime.hour
+    ist_dt = recording.recording_datetime.astimezone(_IST)
+    call_hour = ist_dt.hour
     if call_hour < start_hour or call_hour >= end_hour:
         desc = rule.get("description", "Call outside permitted hours").format(
             start_hour=start_hour, end_hour=end_hour,
@@ -157,7 +163,8 @@ def _check_call_window(recording: CallRecording, rule: dict) -> ComplianceFlag |
 def _check_blocked_weekday(recording: CallRecording, rule: dict) -> ComplianceFlag | None:
     params = rule.get("params", {})
     blocked_day = params.get("weekday", 6)
-    if recording.recording_datetime.weekday() == blocked_day:
+    ist_dt = recording.recording_datetime.astimezone(_IST)
+    if ist_dt.weekday() == blocked_day:
         return ComplianceFlag.objects.create(
             recording=recording,
             flag_type=rule.get("flag_type", "rbi_coc_violation"),
@@ -174,7 +181,7 @@ def _check_gazette_holiday(recording: CallRecording, rule: dict) -> ComplianceFl
     if not holidays_file:
         return None
     holidays = load_gazette_holidays(holidays_file)
-    call_date = recording.recording_datetime.date()
+    call_date = recording.recording_datetime.astimezone(_IST).date()
     if call_date in holidays:
         desc = rule.get("description", "Call on gazette holiday").format(
             holiday_date=call_date.isoformat(),
@@ -197,7 +204,7 @@ def _check_max_calls_per_customer(recording: CallRecording, rule: dict) -> Compl
         settings, "COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY",
         params.get("max_calls", 3),
     )
-    call_date = recording.recording_datetime.date()
+    call_date = recording.recording_datetime.astimezone(_IST).date()
     call_count = CallRecording.objects.filter(
         customer_id=recording.customer_id,
         recording_datetime__date=call_date,

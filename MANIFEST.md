@@ -1,8 +1,8 @@
 # BaySys Call Audit AI — Code Repository Manifest
 
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
-**Last updated:** Session 3 (Prompt C)
-**Test count:** 186 passing
+**Last updated:** Session 5 (Prompt E)
+**Test count:** 241 passing
 **Ruff findings:** 0
 **Open issues:** TBD (issues created after push)
 
@@ -40,12 +40,13 @@
 | `portfolio_id` | CharField(50, null) | Portfolio identifier |
 | `supervisor_id` | CharField(50, null) | Supervisor reference |
 | `agency_id` | CharField(50, null) | Agency identifier for RBAC |
-| `recording_url` | URLField(2000) | Signed S3 URL to MP3 |
+| `recording_url` | CharField(2000) | Raw S3 object key (no URL scheme); signed at submission time via `crm_adapter.get_signed_url()` |
 | `recording_datetime` | DateTimeField | When call was recorded |
 | `customer_phone` | CharField(20, null) | Customer phone |
 | `product_type` | CharField(50, null) | PL / CC / other |
 | `bank_name` | CharField(100, null) | Which bank's portfolio |
 | `status` | CharField(20) | pending/submitted/processing/completed/failed/skipped |
+| `submission_tier` | CharField(20) | immediate/normal/off_peak — assigned at ingestion |
 | `provider_resource_id` | CharField(100, null, unique) | Provider's resource ID |
 | `error_message` | TextField(null) | Last error if failed |
 | `retry_count` | IntegerField(0) | Submission retries |
@@ -123,10 +124,10 @@
 | `apps.py` | AppConfig | name=`baysys_call_audit`, verbose_name=`BaySys Call Audit AI` |
 | `admin.py` | Django admin registrations | All 5 models registered with list_display, filters, search |
 | `auth.py` | Authentication + RBAC | `MockUser`, `MockCrmAuth`, `get_auth_backend()`, `AuditPermissionMixin` |
-| `crm_adapter.py` | CRM mock/prod seam | `get_auth_backend_name()`, `get_user_portfolio()`, `get_team_users()`, `get_user_agency_id()`, `get_agency_list()`, `get_user_names()` |
+| `crm_adapter.py` | CRM mock/prod seam | `get_auth_backend_name()`, `get_user_portfolio()`, `get_team_users()`, `get_user_agency_id()`, `get_agency_list()`, `get_user_names()`, `get_signed_url()` |
 | `speech_provider.py` | Provider adapter | `submit_recording()`, `get_results()`, `delete_resource()`, `ask_question()`, `submit_transcript()`, `update_metadata()`, `ProviderError` |
-| `compliance.py` | Config-driven compliance engine | `check_metadata_compliance()`, `check_provider_compliance()`, `compute_fatal_level()`, `load_compliance_rules()`, `load_fatal_level_rules()`, `load_gazette_holidays()` |
-| `ingestion.py` | Shared ingestion logic | `create_recording_from_row()`, `run_sync_for_date()`, `validate_row()`, `parse_datetime_flexible()`, `normalize_column_name()` |
+| `compliance.py` | Config-driven compliance engine | `check_metadata_compliance()`, `check_provider_compliance()`, `compute_fatal_level()`, `load_compliance_rules()`, `load_fatal_level_rules()`, `load_gazette_holidays()`. All time/date checks use IST via `_IST = ZoneInfo("Asia/Kolkata")`. |
+| `ingestion.py` | Shared ingestion logic | `create_recording_from_row()`, `run_sync_for_date()`, `validate_row()` (non-empty check only, no URL format), `parse_datetime_flexible()`, `normalize_column_name()`, `_determine_submission_tier()`, `_load_submission_priority()`. SYNC_QUERY filters/orders on `call_start_time`. |
 | `services.py` | Business logic | `submit_pending_recordings()`, `process_provider_webhook()`, `run_own_llm_scoring()` (placeholder) |
 | `serializers.py` | DRF serializers | `CallRecordingListSerializer`, `CallTranscriptSerializer`, `ProviderScoreSerializer`, `ComplianceFlagSerializer`, `OwnLLMScoreSerializer`, `CallDetailSerializer`, `DashboardSummarySerializer` |
 | `views.py` | API views | `ProviderWebhookView`, `RecordingListView`, `RecordingDetailView`, `DashboardSummaryView`, `ComplianceFlagListView`, `RecordingImportView`, `SyncCallLogsView` |
@@ -139,6 +140,7 @@
 | `sync_call_logs.py` | Daily sync from `uvarcl_live.call_logs` + `users` JOIN -> `CallRecording`. Args: `--date`, `--batch-size`, `--dry-run` |
 | `import_recordings.py` | CSV/Excel upload -> `CallRecording`. Args: `file_path`, `--sheet`, `--dry-run` |
 | `update_fatal_level_hash.py` | Compute and update `content_hash` in `config/fatal_level_rules.yaml` |
+| `submit_recordings.py` | Submit pending recordings to provider. Args: `--tier`, `--batch-size`, `--dry-run` |
 
 ### Tests (`tests/`)
 
@@ -156,7 +158,8 @@
 | `test_compliance.py` | 38 | Compliance engine: all metadata + provider rules, config loading, holidays, unknown types |
 | `test_fatal_level.py` | 14 | Fatal level computation, content hash, update_fatal_level_hash command |
 | `test_sync_api.py` | 9 | Sync API endpoint: RBAC, date parsing, dry-run, response format |
-| **Total** | **186** | — |
+| `test_submission_tiers.py` | 35 | Tier matching, tier assignment at creation, submit tier filter, S3 re-signing, submit_recordings command |
+| **Total** | **241** | — |
 
 ---
 
@@ -193,6 +196,7 @@
 | `compliance_rules.yaml` | Metadata + provider compliance rules (YAML config) |
 | `fatal_level_rules.yaml` | Fatal level parameter weights + content hash |
 | `gazette_holidays_2026.txt` | India gazette holidays for 2026 |
+| `submission_priority.yaml` | Tier assignment rules: agency_ids, bank_names, product_types per tier |
 
 ## `docs/`
 

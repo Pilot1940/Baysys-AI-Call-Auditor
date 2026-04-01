@@ -14,9 +14,11 @@ Key functions:
   - normalize_column_name()       -> normalize CSV/Excel headers
 """
 import logging
+import os
 import re
 import time
 from datetime import date, datetime, timedelta
+from functools import lru_cache
 
 from django.db import connection
 from django.utils import timezone
@@ -24,6 +26,75 @@ from django.utils import timezone
 from .models import CallRecording
 
 logger = logging.getLogger(__name__)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Submission tier config
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SUBMISSION_PRIORITY_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)),
+    "config",
+    "submission_priority.yaml",
+)
+
+
+@lru_cache(maxsize=1)
+def _load_submission_priority() -> dict:
+    """
+    Load config/submission_priority.yaml.
+    Returns empty dict on missing file or parse error — never raises.
+    Cached after first load (restart/reload to pick up changes).
+    """
+    try:
+        import yaml  # noqa: PLC0415
+        with open(_SUBMISSION_PRIORITY_PATH) as f:
+            data = yaml.safe_load(f)
+        return data or {}
+    except FileNotFoundError:
+        logger.warning("submission_priority.yaml not found — defaulting all recordings to 'normal'")
+        return {}
+    except Exception as exc:
+        logger.warning("Failed to load submission_priority.yaml: %s — defaulting to 'normal'", exc)
+        return {}
+
+
+def _tier_matches(row: dict, tier_cfg: dict) -> bool:
+    """Return True if any rule in tier_cfg matches the given row."""
+    # agency_ids: exact match (compare as str)
+    agency_ids = [str(a) for a in (tier_cfg.get("agency_ids") or [])]
+    if agency_ids and str(row.get("agency_id") or "").strip() in agency_ids:
+        return True
+
+    # bank_names: substring match, case-insensitive
+    bank_names = [str(b).lower() for b in (tier_cfg.get("bank_names") or [])]
+    row_bank = str(row.get("bank_name") or "").lower()
+    if bank_names and any(b in row_bank for b in bank_names if b):
+        return True
+
+    # product_types: exact match, case-insensitive
+    product_types = [str(p).lower() for p in (tier_cfg.get("product_types") or [])]
+    row_product = str(row.get("product_type") or "").lower()
+    if product_types and row_product in product_types:
+        return True
+
+    return False
+
+
+def _determine_submission_tier(row: dict) -> str:
+    """
+    Return 'immediate', 'normal', or 'off_peak' based on submission_priority.yaml config.
+    Precedence: immediate > off_peak > normal.
+    Defaults to 'normal' if config missing or no rules match.
+    """
+    config = _load_submission_priority()
+    tiers_cfg = config.get("tiers") or {}
+
+    if _tier_matches(row, tiers_cfg.get("immediate") or {}):
+        return "immediate"
+    if _tier_matches(row, tiers_cfg.get("off_peak") or {}):
+        return "off_peak"
+    return "normal"
+
 
 SYNC_QUERY = """\
 SELECT
@@ -34,21 +105,21 @@ SELECT
     cl.customer_id,
     cl.customer_number,
     cl.recording_s3_path,
-    cl.created_at,
+    cl.call_start_time,
     cl.call_duration,
     cl.campaign_name,
     cl.loan_id
 FROM uvarcl_live.call_logs cl
 LEFT JOIN uvarcl_live.users u ON cl.agent_id = u.user_id
-WHERE cl.created_at::date = %s
+WHERE cl.call_start_time::date = %s
   AND cl.recording_s3_path IS NOT NULL
   AND cl.call_duration > 10
-ORDER BY cl.created_at
+ORDER BY cl.call_start_time
 """
 
 SYNC_COLUMN_NAMES = [
     "source_id", "agent_id", "agent_name", "agency_id", "customer_id",
-    "customer_number", "recording_s3_path", "created_at", "call_duration",
+    "customer_number", "recording_s3_path", "call_start_time", "call_duration",
     "campaign_name", "loan_id",
 ]
 
@@ -62,7 +133,7 @@ def map_sync_row(row_dict: dict) -> dict:
         "customer_id": str(row_dict["customer_id"]) if row_dict.get("customer_id") is not None else None,
         "customer_phone": row_dict.get("customer_number"),
         "recording_url": row_dict.get("recording_s3_path"),
-        "recording_datetime": row_dict.get("created_at"),
+        "recording_datetime": row_dict.get("call_start_time"),
         "bank_name": row_dict.get("campaign_name"),
         "portfolio_id": str(row_dict["loan_id"]) if row_dict.get("loan_id") is not None else None,
     }
@@ -172,6 +243,8 @@ def create_recording_from_row(row: dict) -> tuple[CallRecording | None, bool]:
     if timezone.is_naive(recording_dt):
         recording_dt = timezone.make_aware(recording_dt)
 
+    tier = _determine_submission_tier(row)
+
     recording = CallRecording.objects.create(
         agent_id=str(row["agent_id"]).strip(),
         agent_name=str(row.get("agent_name") or "Unknown").strip(),
@@ -185,6 +258,7 @@ def create_recording_from_row(row: dict) -> tuple[CallRecording | None, bool]:
         product_type=str(row["product_type"]).strip() if row.get("product_type") else None,
         bank_name=str(row["bank_name"]).strip() if row.get("bank_name") else None,
         status="pending",
+        submission_tier=tier,
     )
 
     # Run metadata compliance checks at ingestion time
@@ -216,8 +290,8 @@ def validate_row(row: dict) -> list[str]:
     url = row.get("recording_url")
     if not url or str(url).strip() == "":
         errors.append("recording_url is required")
-    elif not str(url).strip().startswith(("http", "s3")):
-        errors.append(f"recording_url does not look like a URL: {url}")
+    # Note: recording_url is a raw S3 object key — no URL format check.
+    # Signing happens at submission time via crm_adapter.get_signed_url().
 
     # recording_datetime
     dt_val = row.get("recording_datetime")
