@@ -1,0 +1,8 @@
+Django>=4.2,<5.1
+djangorestframework>=3.14
+django-cors-headers>=4.0
+psycopg2-binary>=2.9
+dj-database-url>=2.0
+requests>=2.31
+python-decouple>=3.8
+ruff>=0.4
