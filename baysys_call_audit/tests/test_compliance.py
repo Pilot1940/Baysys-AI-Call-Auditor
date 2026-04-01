@@ -449,6 +449,73 @@ class MaxCallsThresholdDefaultTests(TestCase):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# max_calls_per_customer: cache vs DB fallback paths
+# ─────────────────────────────────────────────────────────────────────────────
+
+class MaxCallsPerCustomerCachePathTests(TestCase):
+    """Verify the two execution paths of _check_max_calls_per_customer."""
+
+    RULES = {"metadata_rules": [{
+        "id": "M4", "name": "test", "enabled": True,
+        "check_type": "max_calls_per_customer", "severity": "medium",
+        "flag_type": "rbi_coc_violation",
+        "description": "{customer_id} got {call_count} calls on {date} (limit: {max_calls})",
+        "params": {"max_calls": 3},
+    }], "provider_rules": []}
+
+    @patch("baysys_call_audit.compliance.load_compliance_rules")
+    @override_settings(COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY=3)
+    def test_cache_path_no_flag_at_limit(self, mock_rules):
+        """Cache shows count == max_calls: no flag (strictly greater triggers)."""
+        mock_rules.return_value = self.RULES
+        r = _make_recording(customer_id="CC01")
+        flags = check_metadata_compliance(r, call_counts_cache={"CC01": 3})
+        max_flags = [f for f in flags if "limit" in (f.description or "")]
+        self.assertEqual(len(max_flags), 0)
+
+    @patch("baysys_call_audit.compliance.load_compliance_rules")
+    @override_settings(COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY=3)
+    def test_cache_path_flag_over_limit(self, mock_rules):
+        """Cache shows count > max_calls: flag created without a DB query."""
+        mock_rules.return_value = self.RULES
+        r = _make_recording(customer_id="CC02")
+        with patch("baysys_call_audit.compliance.CallRecording.objects") as mock_qs:
+            flags = check_metadata_compliance(r, call_counts_cache={"CC02": 4})
+            mock_qs.filter.assert_not_called()
+        max_flags = [f for f in flags if "limit" in (f.description or "")]
+        self.assertEqual(len(max_flags), 1)
+        self.assertEqual(max_flags[0].severity, "medium")
+
+    @patch("baysys_call_audit.compliance.load_compliance_rules")
+    @override_settings(COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY=3)
+    def test_cache_path_null_customer_skipped(self, mock_rules):
+        """customer_id=None: no flag regardless of cache content."""
+        mock_rules.return_value = self.RULES
+        r = _make_recording(customer_id=None)
+        flags = check_metadata_compliance(r, call_counts_cache={"": 99})
+        max_flags = [f for f in flags if f.flag_type == "rbi_coc_violation"]
+        self.assertEqual(len(max_flags), 0)
+
+    @patch("baysys_call_audit.compliance.load_compliance_rules")
+    @override_settings(COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY=3)
+    def test_db_fallback_when_no_cache(self, mock_rules):
+        """call_counts_cache=None: falls back to DB query (existing behaviour)."""
+        mock_rules.return_value = self.RULES
+        dt = datetime(2026, 4, 1, 10, 0, tzinfo=tz.utc)
+        for i in range(4):
+            _make_recording(
+                customer_id="CC03",
+                recording_url=f"https://s3.example.com/cc03_{i}.mp3",
+                recording_datetime=dt,
+            )
+        r = CallRecording.objects.filter(customer_id="CC03").last()
+        # No cache — should hit DB and find 4 rows → flag
+        flags = check_metadata_compliance(r, call_counts_cache=None)
+        max_flags = [f for f in flags if "limit" in (f.description or "")]
+        self.assertEqual(len(max_flags), 1)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Provider rules
 # ─────────────────────────────────────────────────────────────────────────────
 

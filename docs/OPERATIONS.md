@@ -6,9 +6,9 @@ BaySys Call Audit AI is a call monitoring system that processes recorded MP3 cal
 
 ---
 
-## PC's Supabase (Pre-populated Dev Instance)
+## PC-Supabase (Pre-populated Dev Instance)
 
-PC's Supabase is the shared dev instance for all BaySys projects — pre-configured for development and testing with no cross-DB connections to source RDS required.
+PC-Supabase is the shared dev instance for all BaySys projects — pre-configured for development and testing with no cross-DB connections to source RDS required.
 
 **Instance:** Same Supabase project as Voice Trainer (`DATABASE_URL` in `.env`)
 
@@ -30,7 +30,7 @@ PC's Supabase is the shared dev instance for all BaySys projects — pre-configu
 - 276 distinct agents, 43,043 distinct customers in `call_recordings`
 - `recording_s3_path` format: raw S3 object key e.g. `Rezolution/call_recordings/2026/03/31/call.mp3` — no http:// prefix. This is expected.
 
-**To test sync against PC's Supabase:**
+**To test sync against PC-Supabase:**
 ```bash
 # Sync a date that exists in the loaded call_logs data
 python manage.py sync_call_logs --date 2026-03-31 --dry-run

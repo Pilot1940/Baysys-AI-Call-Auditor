@@ -70,7 +70,7 @@ class SyncCallLogsCommandTests(TestCase):
     @patch("baysys_call_audit.ingestion.connection")
     def test_default_date_is_yesterday(self, mock_conn):
         cursor = MagicMock()
-        cursor.fetchmany.return_value = []
+        cursor.fetchall.return_value = []
         mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
 
@@ -84,7 +84,7 @@ class SyncCallLogsCommandTests(TestCase):
     @patch("baysys_call_audit.ingestion.connection")
     def test_custom_date(self, mock_conn):
         cursor = MagicMock()
-        cursor.fetchmany.return_value = []
+        cursor.fetchall.return_value = []
         mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
 
@@ -99,7 +99,7 @@ class SyncCallLogsCommandTests(TestCase):
         rows = [_make_db_row(source_id=i, recording_s3_path=f"https://s3.example.com/rec{i}.mp3")
                 for i in range(3)]
         cursor = MagicMock()
-        cursor.fetchmany.side_effect = [rows, []]
+        cursor.fetchall.return_value = rows
         mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
 
@@ -113,7 +113,7 @@ class SyncCallLogsCommandTests(TestCase):
     def test_dedup_on_second_run(self, _cr, mock_conn):
         rows = [_make_db_row()]
         cursor = MagicMock()
-        cursor.fetchmany.side_effect = [rows, []]
+        cursor.fetchall.return_value = rows
         mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
 
@@ -121,7 +121,6 @@ class SyncCallLogsCommandTests(TestCase):
         self.assertEqual(CallRecording.objects.count(), 1)
 
         # Second run with same data
-        cursor.fetchmany.side_effect = [rows, []]
         output = self._run_command(date="2026-03-30", batch_size=5000, dry_run=False)
 
         self.assertEqual(CallRecording.objects.count(), 1)
@@ -131,7 +130,7 @@ class SyncCallLogsCommandTests(TestCase):
     def test_dry_run_no_db_writes(self, mock_conn):
         rows = [_make_db_row()]
         cursor = MagicMock()
-        cursor.fetchmany.side_effect = [rows, []]
+        cursor.fetchall.return_value = rows
         mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
 
@@ -146,7 +145,7 @@ class SyncCallLogsCommandTests(TestCase):
     def test_unknown_agent_counted(self, _cr, mock_conn):
         rows = [_make_db_row(agent_name="Unknown")]
         cursor = MagicMock()
-        cursor.fetchmany.side_effect = [rows, []]
+        cursor.fetchall.return_value = rows
         mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
 
@@ -157,7 +156,7 @@ class SyncCallLogsCommandTests(TestCase):
     @patch("baysys_call_audit.ingestion.connection")
     def test_empty_result_set(self, mock_conn):
         cursor = MagicMock()
-        cursor.fetchmany.return_value = []
+        cursor.fetchall.return_value = []
         mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
 
@@ -167,21 +166,24 @@ class SyncCallLogsCommandTests(TestCase):
         self.assertIn("Fetched:            0", output)
 
     @patch("baysys_call_audit.ingestion.connection")
-    def test_batch_size_passed_to_fetchmany(self, mock_conn):
+    def test_batch_size_accepted_fetchall_used(self, mock_conn):
+        # batch_size no longer controls the raw cursor fetch — fetchall() drains all rows
+        # before any ORM write. Verify fetchall is called and fetchmany is not.
         cursor = MagicMock()
-        cursor.fetchmany.return_value = []
+        cursor.fetchall.return_value = []
         mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
 
         self._run_command(date="2026-03-30", batch_size=100, dry_run=False)
 
-        cursor.fetchmany.assert_called_with(100)
+        cursor.fetchall.assert_called_once()
+        cursor.fetchmany.assert_not_called()
 
     @patch("baysys_call_audit.ingestion.connection")
     @override_settings(SYNC_MIN_CALL_DURATION=20)
     def test_min_duration_default_passed_to_query(self, mock_conn):
         cursor = MagicMock()
-        cursor.fetchmany.return_value = []
+        cursor.fetchall.return_value = []
         mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
 
@@ -194,7 +196,7 @@ class SyncCallLogsCommandTests(TestCase):
     @override_settings(SYNC_MIN_CALL_DURATION=5)
     def test_min_duration_override_via_settings(self, mock_conn):
         cursor = MagicMock()
-        cursor.fetchmany.return_value = []
+        cursor.fetchall.return_value = []
         mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
 
@@ -226,7 +228,7 @@ class BulkDedupPrefetchTests(TestCase):
         )
         rows = [_make_db_row(recording_s3_path="https://s3.example.com/rec1.mp3")]
         cursor = MagicMock()
-        cursor.fetchmany.side_effect = [rows, []]
+        cursor.fetchall.return_value = rows
         mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
 
@@ -245,7 +247,7 @@ class BulkDedupPrefetchTests(TestCase):
             _make_db_row(source_id=2, recording_s3_path=url),
         ]
         cursor = MagicMock()
-        cursor.fetchmany.side_effect = [rows, []]
+        cursor.fetchall.return_value = rows
         mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
 
@@ -265,7 +267,7 @@ class BulkDedupPrefetchTests(TestCase):
             _make_db_row(source_id=3, recording_s3_path="https://s3.example.com/c.mp3"),
         ]
         cursor = MagicMock()
-        cursor.fetchmany.side_effect = [rows, []]
+        cursor.fetchall.return_value = rows
         mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
 
@@ -274,3 +276,89 @@ class BulkDedupPrefetchTests(TestCase):
         self.assertEqual(CallRecording.objects.count(), 2)
         self.assertIn("Created:            2", output)
         self.assertIn("Skipped (dedup):    1", output)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# call_counts_cache: pre-fetch and in-loop increment
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CallCountsCacheTests(TestCase):
+    """Tests for the per-customer call-count cache that eliminates the N+1
+    DB query in _check_max_calls_per_customer during sync."""
+
+    RULES_MAX3 = {"metadata_rules": [{
+        "id": "M4", "name": "max_calls", "enabled": True,
+        "check_type": "max_calls_per_customer", "severity": "medium",
+        "flag_type": "rbi_coc_violation",
+        "description": "{customer_id} got {call_count} calls on {date} (limit: {max_calls})",
+        "params": {"max_calls": 3},
+    }], "provider_rules": []}
+
+    def _run_command(self, *args, **kwargs):
+        out = StringIO()
+        cmd = Command(stdout=out, stderr=StringIO())
+        cmd.handle(*args, **kwargs)
+        return out.getvalue()
+
+    @patch("baysys_call_audit.ingestion.connection")
+    @patch("baysys_call_audit.compliance.load_compliance_rules")
+    @override_settings(COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY=3)
+    def test_cache_pre_fetched_from_existing_rows(self, mock_rules, mock_conn):
+        """Pre-existing recordings for the date seed the cache; new rows increment it."""
+        mock_rules.return_value = self.RULES_MAX3
+        # Pre-seed: 3 recordings for customer C001 already in DB
+        dt = datetime(2026, 3, 30, 10, 0, 0, tzinfo=dt_tz.utc)
+        for i in range(3):
+            CallRecording.objects.create(
+                agent_id="101", agent_name="Agent",
+                customer_id="C001",
+                recording_url=f"https://s3.example.com/pre_{i}.mp3",
+                recording_datetime=dt, status="pending",
+            )
+        # Sync brings one more call for the same customer
+        rows = [_make_db_row(
+            source_id=99,
+            customer_id="C001",
+            recording_s3_path="https://s3.example.com/new_c001.mp3",
+            call_start_time=dt,
+        )]
+        cursor = MagicMock()
+        cursor.fetchall.return_value = rows
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+        self._run_command(date="2026-03-30", batch_size=5000, dry_run=False)
+
+        # 4th call (> limit 3) must have a compliance flag
+        new_rec = CallRecording.objects.get(recording_url="https://s3.example.com/new_c001.mp3")
+        from baysys_call_audit.models import ComplianceFlag
+        flags = ComplianceFlag.objects.filter(recording=new_rec, flag_type="rbi_coc_violation")
+        self.assertEqual(flags.count(), 1)
+
+    @patch("baysys_call_audit.ingestion.connection")
+    @patch("baysys_call_audit.compliance.load_compliance_rules")
+    @override_settings(COMPLIANCE_MAX_CALLS_PER_CUSTOMER_PER_DAY=3)
+    def test_cache_incremented_within_batch(self, mock_rules, mock_conn):
+        """Cache increments correctly across rows in the same batch."""
+        mock_rules.return_value = self.RULES_MAX3
+        dt = datetime(2026, 3, 30, 10, 0, 0, tzinfo=dt_tz.utc)
+        # 4 rows for the same customer in one batch — 4th must be flagged
+        rows = [
+            _make_db_row(
+                source_id=i, customer_id="C002",
+                recording_s3_path=f"https://s3.example.com/c002_{i}.mp3",
+                call_start_time=dt,
+            )
+            for i in range(4)
+        ]
+        cursor = MagicMock()
+        cursor.fetchall.return_value = rows
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+        self._run_command(date="2026-03-30", batch_size=5000, dry_run=False)
+
+        self.assertEqual(CallRecording.objects.filter(customer_id="C002").count(), 4)
+        from baysys_call_audit.models import ComplianceFlag
+        flagged_recs = ComplianceFlag.objects.filter(flag_type="rbi_coc_violation")
+        self.assertGreaterEqual(flagged_recs.count(), 1)

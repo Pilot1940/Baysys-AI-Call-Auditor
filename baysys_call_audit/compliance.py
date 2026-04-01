@@ -118,8 +118,18 @@ def load_gazette_holidays(holidays_file: str) -> frozenset[date]:
 # Metadata compliance (runs at ingestion time)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def check_metadata_compliance(recording: CallRecording) -> list[ComplianceFlag]:
-    """Run all enabled metadata rules against a recording."""
+def check_metadata_compliance(
+    recording: CallRecording,
+    call_counts_cache: dict | None = None,
+) -> list[ComplianceFlag]:
+    """
+    Run all enabled metadata rules against a recording.
+
+    call_counts_cache: optional dict[customer_id, int] pre-computed by the sync
+    loop.  When provided, _check_max_calls_per_customer uses an O(1) dict lookup
+    instead of a per-row DB query.  Pass None (default) to fall back to the DB
+    query — used by the webhook path where no pre-fetch is available.
+    """
     rules_data = load_compliance_rules()
     metadata_rules = rules_data.get("metadata_rules", [])
     flags = []
@@ -132,14 +142,14 @@ def check_metadata_compliance(recording: CallRecording) -> list[ComplianceFlag]:
         if handler is None:
             logger.warning("Unknown metadata check_type: %s (rule %s)", check_type, rule.get("id"))
             continue
-        flag = handler(recording, rule)
+        flag = handler(recording, rule, call_counts_cache=call_counts_cache)
         if flag:
             flags.append(flag)
 
     return flags
 
 
-def _check_call_window(recording: CallRecording, rule: dict) -> ComplianceFlag | None:
+def _check_call_window(recording: CallRecording, rule: dict, **_kwargs) -> ComplianceFlag | None:
     params = rule.get("params", {})
     start_hour = getattr(settings, "COMPLIANCE_CALL_WINDOW_START_HOUR", params.get("start_hour", 8))
     end_hour = getattr(settings, "COMPLIANCE_CALL_WINDOW_END_HOUR", params.get("end_hour", 20))
@@ -160,7 +170,7 @@ def _check_call_window(recording: CallRecording, rule: dict) -> ComplianceFlag |
     return None
 
 
-def _check_blocked_weekday(recording: CallRecording, rule: dict) -> ComplianceFlag | None:
+def _check_blocked_weekday(recording: CallRecording, rule: dict, **_kwargs) -> ComplianceFlag | None:
     params = rule.get("params", {})
     blocked_day = params.get("weekday", 6)
     ist_dt = recording.recording_datetime.astimezone(_IST)
@@ -175,7 +185,7 @@ def _check_blocked_weekday(recording: CallRecording, rule: dict) -> ComplianceFl
     return None
 
 
-def _check_gazette_holiday(recording: CallRecording, rule: dict) -> ComplianceFlag | None:
+def _check_gazette_holiday(recording: CallRecording, rule: dict, **_kwargs) -> ComplianceFlag | None:
     params = rule.get("params", {})
     holidays_file = params.get("holidays_file", "")
     if not holidays_file:
@@ -196,7 +206,12 @@ def _check_gazette_holiday(recording: CallRecording, rule: dict) -> ComplianceFl
     return None
 
 
-def _check_max_calls_per_customer(recording: CallRecording, rule: dict) -> ComplianceFlag | None:
+def _check_max_calls_per_customer(
+    recording: CallRecording,
+    rule: dict,
+    call_counts_cache: dict | None = None,
+    **_kwargs,
+) -> ComplianceFlag | None:
     if not recording.customer_id:
         return None
     params = rule.get("params", {})
@@ -205,10 +220,16 @@ def _check_max_calls_per_customer(recording: CallRecording, rule: dict) -> Compl
         params.get("max_calls", 3),
     )
     call_date = recording.recording_datetime.astimezone(_IST).date()
-    call_count = CallRecording.objects.filter(
-        customer_id=recording.customer_id,
-        recording_datetime__date=call_date,
-    ).count()
+    if call_counts_cache is not None:
+        # Fast path: O(1) dict lookup. Cache is pre-fetched by run_sync_for_date
+        # and incremented after each create, so the count includes this recording.
+        call_count = call_counts_cache.get(recording.customer_id, 0)
+    else:
+        # Fallback: DB query — used on the webhook path where no pre-fetch exists.
+        call_count = CallRecording.objects.filter(
+            customer_id=recording.customer_id,
+            recording_datetime__date=call_date,
+        ).count()
     if call_count > max_calls:
         desc = rule.get("description", "Excessive calls to customer").format(
             customer_id=recording.customer_id,

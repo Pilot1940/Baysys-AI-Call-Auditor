@@ -91,7 +91,7 @@ Every session that modifies code MUST update MANIFEST.md, BUILD_LOG.md, and docs
 - **265 tests passing, 0 ruff findings**
 - 5 Django models: CallRecording, CallTranscript, ProviderScore, ComplianceFlag, OwnLLMScore
 - Migrations 0001–0004 applied
-- **PC's Supabase fully configured:** `uvarcl_live.call_logs` (500K rows), `uvarcl_live.users` (662 rows, anonymised), `baysys_call_audit.*` all 5 tables created. Sync can be run end-to-end with no RDS connection needed.
+- **PC-Supabase fully configured:** `uvarcl_live.call_logs` (500K rows), `uvarcl_live.users` (662 rows, anonymised), `baysys_call_audit.*` all 5 tables created. Sync can be run end-to-end with no RDS connection needed.
 - speech_provider.py implements GreyLabs (6 public functions)
 - Webhook receiver live at `/audit/webhook/provider/`
 - Ingestion service: `submit_pending_recordings()`, `process_provider_webhook()`, `run_own_llm_scoring()` (placeholder)

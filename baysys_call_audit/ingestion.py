@@ -22,6 +22,7 @@ from functools import lru_cache
 
 from django.conf import settings
 from django.db import connection
+from django.db.models import Count
 from django.utils import timezone
 
 from .models import CallRecording
@@ -150,6 +151,12 @@ def run_sync_for_date(
 
     Called by both the management command and the API endpoint.
 
+    batch_size is accepted for API compatibility but no longer controls the raw SQL
+    fetch — all rows are drained into a Python list before ORM writes begin, so the
+    raw cursor is closed before any transaction-generating ORM call is made.  This
+    is required for pgbouncer transaction-mode pooling, where an ORM commit can
+    invalidate an open server-side cursor.
+
     Returns dict with keys: fetched, created, skipped_dedup, skipped_validation,
     unknown_agents, errors, duration_seconds.
     """
@@ -164,6 +171,18 @@ def run_sync_for_date(
         ).values_list("recording_url", flat=True)
     )
 
+    # Pre-fetch per-customer call counts for this date in one query.
+    # Avoids an N+1 DB query inside _check_max_calls_per_customer.
+    # The dict is mutated in-place inside create_recording_from_row as new
+    # rows are created, keeping counts accurate across loop iterations.
+    call_counts_cache: dict[str, int] = {
+        row["customer_id"]: row["cnt"]
+        for row in CallRecording.objects.filter(
+            recording_datetime__date=target_date,
+            customer_id__isnull=False,
+        ).values("customer_id").annotate(cnt=Count("id"))
+    }
+
     start_time = time.monotonic()
     counts = {
         "fetched": 0,
@@ -174,47 +193,53 @@ def run_sync_for_date(
         "errors": 0,
     }
 
+    # Drain the raw cursor entirely before starting ORM writes.
+    # Under pgbouncer transaction-mode pooling each ORM commit returns the
+    # connection to the pool, which invalidates any open server-side cursor.
+    # fetchall() pulls every row into a Python list so the cursor (and its
+    # DB connection) can be released before any ORM call is made.
     with connection.cursor() as cursor:
         min_duration = getattr(settings, "SYNC_MIN_CALL_DURATION", 20)
         cursor.execute(SYNC_QUERY, [str(target_date), min_duration])
-        while True:
-            rows = cursor.fetchmany(batch_size)
-            if not rows:
-                break
+        raw_rows = cursor.fetchall()
 
-            for db_row in rows:
-                counts["fetched"] += 1
-                row_dict = dict(zip(SYNC_COLUMN_NAMES, db_row))
-                mapped = map_sync_row(row_dict)
+    for db_row in raw_rows:
+        counts["fetched"] += 1
+        row_dict = dict(zip(SYNC_COLUMN_NAMES, db_row))
+        mapped = map_sync_row(row_dict)
 
-                if mapped.get("agent_name") == "Unknown":
-                    counts["unknown_agents"] += 1
+        if mapped.get("agent_name") == "Unknown":
+            counts["unknown_agents"] += 1
 
-                if dry_run:
-                    errors = validate_row(mapped)
-                    if errors:
-                        counts["skipped_validation"] += 1
-                    else:
-                        counts["created"] += 1
-                    continue
+        if dry_run:
+            errors = validate_row(mapped)
+            if errors:
+                counts["skipped_validation"] += 1
+            else:
+                counts["created"] += 1
+            continue
 
-                try:
-                    recording_url = str(mapped.get("recording_url") or "").strip()
-                    if recording_url and recording_url in existing_urls:
-                        counts["skipped_dedup"] += 1
-                        continue
+        try:
+            recording_url = str(mapped.get("recording_url") or "").strip()
+            if recording_url and recording_url in existing_urls:
+                counts["skipped_dedup"] += 1
+                continue
 
-                    recording, created = create_recording_from_row(mapped, existing_urls=existing_urls)
-                    if created:
-                        counts["created"] += 1
-                        existing_urls.add(recording_url)
-                    elif recording is None:
-                        counts["skipped_validation"] += 1
-                    else:
-                        counts["skipped_dedup"] += 1
-                except Exception:
-                    counts["errors"] += 1
-                    logger.exception("Error creating recording from row")
+            recording, created = create_recording_from_row(
+                mapped,
+                existing_urls=existing_urls,
+                call_counts_cache=call_counts_cache,
+            )
+            if created:
+                counts["created"] += 1
+                existing_urls.add(recording_url)
+            elif recording is None:
+                counts["skipped_validation"] += 1
+            else:
+                counts["skipped_dedup"] += 1
+        except Exception:
+            counts["errors"] += 1
+            logger.exception("Error creating recording from row")
 
     counts["duration_seconds"] = round(time.monotonic() - start_time, 1)
     return counts
@@ -223,6 +248,7 @@ def run_sync_for_date(
 def create_recording_from_row(
     row: dict,
     existing_urls: set[str] | None = None,
+    call_counts_cache: dict | None = None,
 ) -> tuple[CallRecording | None, bool]:
     """
     Create or skip a CallRecording from a dict of field values.
@@ -240,6 +266,13 @@ def create_recording_from_row(
                        the target date. When provided, dedup uses O(1) set lookup
                        instead of a DB query. Pass None to fall back to DB query
                        (used by CSV/Excel import path).
+        call_counts_cache: optional dict[customer_id, int] pre-fetched by
+                           run_sync_for_date.  Passed through to
+                           check_metadata_compliance so that
+                           _check_max_calls_per_customer avoids a per-row DB query.
+                           Mutated in-place: incremented for this recording's
+                           customer_id after a successful create.  Pass None to
+                           fall back to DB query (CSV/Excel import and webhook paths).
 
     Returns:
         (recording, created) — the CallRecording instance and whether it was newly created.
@@ -290,10 +323,17 @@ def create_recording_from_row(
         submission_tier=tier,
     )
 
+    # Increment the per-customer count before compliance so the check sees the
+    # correct total (pre-fetched count + this newly created recording).
+    if call_counts_cache is not None and recording.customer_id:
+        call_counts_cache[recording.customer_id] = (
+            call_counts_cache.get(recording.customer_id, 0) + 1
+        )
+
     # Run metadata compliance checks at ingestion time
     from .compliance import check_metadata_compliance  # noqa: PLC0415
 
-    check_metadata_compliance(recording)
+    check_metadata_compliance(recording, call_counts_cache=call_counts_cache)
 
     return (recording, True)
 
