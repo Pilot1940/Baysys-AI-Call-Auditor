@@ -113,12 +113,9 @@ python manage.py sync_call_logs --date 2026-03-30 --dry-run
 
 **Filters applied:** `recording_s3_path IS NOT NULL AND call_duration > 10`.
 
-**Dedup:** Safe to run twice for the same date — existing `recording_url` values are skipped.
+**Dedup:** Safe to run twice for the same date — existing `recording_url` values are skipped. The sync pre-fetches all existing URLs for the target date in one query before the loop (O(1) per-row check); a full date's sync against Supabase runs in under 30 seconds.
 
-**Scheduling:** Run daily via cron after midnight:
-```cron
-15 0 * * * cd /path/to/project && python manage.py sync_call_logs
-```
+**Scheduling:** See the full cron schedule in the **Cron Setup** section below.
 
 ### Path 2: CSV/Excel upload (backfill)
 
@@ -222,17 +219,7 @@ Tier assignment is config-driven via `config/submission_priority.yaml`. Matching
 
 Precedence: `immediate` > `off_peak` > `normal`. If no rule matches, tier defaults to `normal`.
 
-**Recommended cron schedule (tier-based):**
-```cron
-# Immediate tier — run every 15 minutes
-*/15 * * * * cd /path/to/project && python manage.py submit_recordings --tier immediate --batch-size 200
-
-# Normal tier — run hourly
-0 * * * * cd /path/to/project && python manage.py submit_recordings --tier normal --batch-size 1000
-
-# Off-peak tier — run once at night
-0 2 * * * cd /path/to/project && python manage.py submit_recordings --tier off_peak --batch-size 5000
-```
+See the full cron schedule in the **Cron Setup** section below.
 
 ### Rate limiting
 - Provider rate limit: 200 requests/min
@@ -296,6 +283,38 @@ WHERE status = 'failed'
 ORDER BY created_at DESC;
 ```
 - Reset to pending for retry: `UPDATE call_recordings SET status='pending', retry_count=0 WHERE id=<ID>;`
+
+---
+
+## Cron Setup
+
+All cron jobs run from the project root with the virtualenv activated. Replace `/path/to/project` with the actual deployment path inside the CRM API server.
+
+```cron
+# ── BaySys AI Call Auditor — Cron Schedule ────────────────────────────────────
+
+# 1. Daily sync: pull previous day's calls from call_logs → call_recordings
+#    Runs at 00:15 every night (after midnight, gives CRM time to finish writing)
+15 0 * * * cd /path/to/project && .venv/bin/python manage.py sync_call_logs >> /var/log/baysys_audit/sync.log 2>&1
+
+# 2. Immediate tier: submit highest-priority recordings to provider
+#    Runs every 15 minutes throughout the day
+*/15 * * * * cd /path/to/project && .venv/bin/python manage.py submit_recordings --tier immediate --batch-size 200 >> /var/log/baysys_audit/submit.log 2>&1
+
+# 3. Normal tier: submit standard recordings
+#    Runs every hour
+0 * * * * cd /path/to/project && .venv/bin/python manage.py submit_recordings --tier normal --batch-size 1000 >> /var/log/baysys_audit/submit.log 2>&1
+
+# 4. Off-peak tier: submit backfill / archival recordings overnight
+#    Runs once at 2am
+0 2 * * * cd /path/to/project && .venv/bin/python manage.py submit_recordings --tier off_peak --batch-size 5000 >> /var/log/baysys_audit/submit.log 2>&1
+```
+
+**Notes:**
+- The sync command (job 1) and submission commands (jobs 2–4) are independent. Sync populates `call_recordings` with `status=pending`; submission picks up pending rows and sends them to the provider.
+- If cron misses, use the failsafe API endpoint: `POST /audit/recordings/sync/` (Admin/Supervisor only).
+- Rate limit: 200 requests/min to provider. At that rate, 18K daily recordings clear in ~90 minutes.
+- Log rotation for `/var/log/baysys_audit/` recommended — same as Voice Trainer setup.
 
 ---
 

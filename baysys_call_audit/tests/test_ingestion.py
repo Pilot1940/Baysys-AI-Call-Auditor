@@ -197,6 +197,56 @@ class CreateRecordingFromRowTests(TestCase):
         self.assertEqual(recording.recording_datetime, dt)
 
 
+class CreateRecordingExistingUrlsTests(TestCase):
+    """Tests for the existing_urls parameter (fast-path dedup)."""
+
+    def test_existing_urls_none_fallback_to_db(self):
+        # Default (None): dedup falls back to DB query
+        create_recording_from_row(_valid_row())  # create once
+        recording, created = create_recording_from_row(_valid_row(), existing_urls=None)
+        self.assertFalse(created)
+        self.assertIsNotNone(recording)  # DB fallback returns the existing instance
+        self.assertEqual(CallRecording.objects.count(), 1)
+
+    def test_existing_urls_empty_set_creates(self):
+        # Empty set — no dedup hit, recording is created
+        recording, created = create_recording_from_row(_valid_row(), existing_urls=set())
+        self.assertTrue(created)
+        self.assertIsNotNone(recording)
+        self.assertEqual(CallRecording.objects.count(), 1)
+
+    def test_existing_urls_hit_returns_none_false(self):
+        # URL already in set — returns (None, False), no DB write
+        url = "https://s3.example.com/recording.mp3"
+        recording, created = create_recording_from_row(
+            _valid_row(recording_url=url),
+            existing_urls={url},
+        )
+        self.assertIsNone(recording)
+        self.assertFalse(created)
+        self.assertEqual(CallRecording.objects.count(), 0)
+
+    def test_existing_urls_hit_no_db_query(self):
+        # URL in set — no DB query issued (dedup returns immediately after validation)
+        url = "https://s3.example.com/recording.mp3"
+        with self.assertNumQueries(0):
+            result = create_recording_from_row(
+                _valid_row(recording_url=url),
+                existing_urls={url},
+            )
+        self.assertEqual(result, (None, False))
+
+    def test_existing_urls_miss_creates_normally(self):
+        # Different URL in set — row's URL is not a hit, recording is created
+        recording, created = create_recording_from_row(
+            _valid_row(recording_url="https://s3.example.com/new.mp3"),
+            existing_urls={"https://s3.example.com/other.mp3"},
+        )
+        self.assertTrue(created)
+        self.assertIsNotNone(recording)
+        self.assertEqual(CallRecording.objects.count(), 1)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SYNC_QUERY and map_sync_row: call_start_time
 # ─────────────────────────────────────────────────────────────────────────────

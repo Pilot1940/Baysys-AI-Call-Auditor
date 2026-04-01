@@ -155,6 +155,14 @@ def run_sync_for_date(
     if target_date is None:
         target_date = date.today() - timedelta(days=1)
 
+    # Pre-fetch existing recording_urls for this date in one query.
+    # This avoids N individual SELECT queries during the dedup check below.
+    existing_urls: set[str] = set(
+        CallRecording.objects.filter(
+            recording_datetime__date=target_date,
+        ).values_list("recording_url", flat=True)
+    )
+
     start_time = time.monotonic()
     counts = {
         "fetched": 0,
@@ -189,9 +197,15 @@ def run_sync_for_date(
                     continue
 
                 try:
-                    recording, created = create_recording_from_row(mapped)
+                    recording_url = str(mapped.get("recording_url") or "").strip()
+                    if recording_url and recording_url in existing_urls:
+                        counts["skipped_dedup"] += 1
+                        continue
+
+                    recording, created = create_recording_from_row(mapped, existing_urls=existing_urls)
                     if created:
                         counts["created"] += 1
+                        existing_urls.add(recording_url)
                     elif recording is None:
                         counts["skipped_validation"] += 1
                     else:
@@ -204,7 +218,10 @@ def run_sync_for_date(
     return counts
 
 
-def create_recording_from_row(row: dict) -> tuple[CallRecording | None, bool]:
+def create_recording_from_row(
+    row: dict,
+    existing_urls: set[str] | None = None,
+) -> tuple[CallRecording | None, bool]:
     """
     Create or skip a CallRecording from a dict of field values.
 
@@ -217,6 +234,10 @@ def create_recording_from_row(row: dict) -> tuple[CallRecording | None, bool]:
              Expected: agent_name (populated by sync JOIN; CSV may provide directly)
              Optional: customer_id, portfolio_id, supervisor_id, agency_id,
                        customer_phone, product_type, bank_name
+        existing_urls: pre-fetched set of recording_url values already in the DB for
+                       the target date. When provided, dedup uses O(1) set lookup
+                       instead of a DB query. Pass None to fall back to DB query
+                       (used by CSV/Excel import path).
 
     Returns:
         (recording, created) — the CallRecording instance and whether it was newly created.
@@ -230,9 +251,15 @@ def create_recording_from_row(row: dict) -> tuple[CallRecording | None, bool]:
     recording_url = str(row["recording_url"]).strip()
 
     # Dedup on recording_url
-    existing = CallRecording.objects.filter(recording_url=recording_url).first()
-    if existing:
-        return (existing, False)
+    if existing_urls is not None:
+        # Fast path: O(1) set lookup (pre-fetched by run_sync_for_date)
+        if recording_url in existing_urls:
+            return (None, False)
+    else:
+        # Fallback: DB query (used by CSV/Excel import path)
+        existing = CallRecording.objects.filter(recording_url=recording_url).first()
+        if existing:
+            return (existing, False)
 
     # Parse datetime
     recording_dt = parse_datetime_flexible(row["recording_datetime"])

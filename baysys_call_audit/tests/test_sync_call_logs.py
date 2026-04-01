@@ -176,3 +176,75 @@ class SyncCallLogsCommandTests(TestCase):
         self._run_command(date="2026-03-30", batch_size=100, dry_run=False)
 
         cursor.fetchmany.assert_called_with(100)
+
+
+class BulkDedupPrefetchTests(TestCase):
+    """Tests for the pre-fetch dedup optimisation (Prompt F)."""
+
+    def _run_command(self, *args, **kwargs):
+        out = StringIO()
+        cmd = Command(stdout=out, stderr=StringIO())
+        cmd.handle(*args, **kwargs)
+        return out.getvalue()
+
+    @patch("baysys_call_audit.ingestion.connection")
+    @patch("baysys_call_audit.compliance.load_compliance_rules", return_value={"metadata_rules": []})
+    def test_prefetch_dedup_pre_existing_recording(self, _cr, mock_conn):
+        # A recording already in the DB for 2026-03-30 must be skipped via the pre-fetch set
+        CallRecording.objects.create(
+            agent_id="101",
+            agent_name="Test Agent",
+            recording_url="https://s3.example.com/rec1.mp3",
+            recording_datetime=datetime(2026, 3, 30, 10, 0, 0, tzinfo=dt_tz.utc),
+            status="pending",
+        )
+        rows = [_make_db_row(recording_s3_path="https://s3.example.com/rec1.mp3")]
+        cursor = MagicMock()
+        cursor.fetchmany.side_effect = [rows, []]
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+        output = self._run_command(date="2026-03-30", batch_size=5000, dry_run=False)
+
+        self.assertEqual(CallRecording.objects.count(), 1)  # no new row created
+        self.assertIn("Skipped (dedup):    1", output)
+
+    @patch("baysys_call_audit.ingestion.connection")
+    @patch("baysys_call_audit.compliance.load_compliance_rules", return_value={"metadata_rules": []})
+    def test_intrabatch_dedup_same_url(self, _cr, mock_conn):
+        # Two rows with the same recording_url in one batch — second must be skipped
+        url = "https://s3.example.com/same.mp3"
+        rows = [
+            _make_db_row(source_id=1, recording_s3_path=url),
+            _make_db_row(source_id=2, recording_s3_path=url),
+        ]
+        cursor = MagicMock()
+        cursor.fetchmany.side_effect = [rows, []]
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+        output = self._run_command(date="2026-03-30", batch_size=5000, dry_run=False)
+
+        self.assertEqual(CallRecording.objects.count(), 1)
+        self.assertIn("Created:            1", output)
+        self.assertIn("Skipped (dedup):    1", output)
+
+    @patch("baysys_call_audit.ingestion.connection")
+    @patch("baysys_call_audit.compliance.load_compliance_rules", return_value={"metadata_rules": []})
+    def test_intrabatch_dedup_set_updated_after_create(self, _cr, mock_conn):
+        # Three rows: A (new), B (same as A, should be dedup'd), C (different, new)
+        rows = [
+            _make_db_row(source_id=1, recording_s3_path="https://s3.example.com/a.mp3"),
+            _make_db_row(source_id=2, recording_s3_path="https://s3.example.com/a.mp3"),
+            _make_db_row(source_id=3, recording_s3_path="https://s3.example.com/c.mp3"),
+        ]
+        cursor = MagicMock()
+        cursor.fetchmany.side_effect = [rows, []]
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+        output = self._run_command(date="2026-03-30", batch_size=5000, dry_run=False)
+
+        self.assertEqual(CallRecording.objects.count(), 2)
+        self.assertIn("Created:            2", output)
+        self.assertIn("Skipped (dedup):    1", output)

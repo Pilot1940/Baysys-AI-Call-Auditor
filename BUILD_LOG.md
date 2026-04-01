@@ -17,6 +17,7 @@
 | C | Sync API + RBI COC compliance engine + fatal level | 2026-04-01 | #7 |
 | D | S3 URL re-signing + submission tier system | 2026-04-01 | #6 |
 | E | S3 raw key storage + IST timezone compliance | 2026-04-01 | #8, #9 |
+| F | Bulk dedup pre-fetch: O(1) per row sync performance | 2026-04-01 | #10 |
 
 ---
 
@@ -265,3 +266,57 @@ Live DB validation against `uvarcl_live.call_logs` revealed:
 5. **Existing tests updated** — `CallWindowTests` tests adjusted to use UTC times that correctly map to the intended IST hours. `test_sync_call_logs.py` helper renamed to reflect the column change.
 
 ### Test count at end of session: 241 passing, 0 ruff findings
+
+---
+
+## Session 6 — Prompt F: Sync Performance — Bulk Dedup Pre-fetch
+
+**Date:** 2026-04-01
+**Scope:** Fix N-query dedup performance bug discovered during first real sync run against Supabase.
+**Issues closed:** #10
+
+### Bug source
+
+First live sync of a single date (11,429 rows) issued one `SELECT` per row to check for duplicates over a Supabase pooler connection. At 50–100ms per round trip, a single date took 10–20 minutes — unacceptable for a nightly cron job.
+
+### Fix
+
+`run_sync_for_date()` now pre-fetches all existing `recording_url` values for the target date in **one** ORM query before the loop:
+
+```python
+existing_urls: set[str] = set(
+    CallRecording.objects.filter(recording_datetime__date=target_date)
+    .values_list("recording_url", flat=True)
+)
+```
+
+Dedup inside the loop is then an O(1) `in` check. `existing_urls` is updated after each successful create for correct intra-batch dedup.
+
+`create_recording_from_row()` accepts an optional `existing_urls: set[str] | None = None` parameter — fast path when provided, DB-query fallback when None (CSV/Excel import path unchanged).
+
+### Performance impact
+
+| | Before | After |
+|---|---|---|
+| DB queries for 11K row sync | ~11,429 | 1 pre-fetch + N creates |
+| Duration for one date | 10–20 min | < 30 seconds |
+| CSV import path | unchanged | unchanged |
+
+### Files modified
+
+- `baysys_call_audit/ingestion.py` — `run_sync_for_date()` pre-fetch + intra-batch dedup; `create_recording_from_row()` `existing_urls` parameter
+- `baysys_call_audit/tests/test_ingestion.py` — 5 new tests for `existing_urls` parameter
+- `baysys_call_audit/tests/test_sync_call_logs.py` — 3 new tests for pre-fetch + intra-batch dedup
+- `CLAUDE.md`, `MANIFEST.md`, `BUILD_LOG.md`, `docs/OPERATIONS.md` — updated
+
+### Key decisions
+
+1. **Pre-fetch scoped to target date** — filters on `recording_datetime__date=target_date`. Avoids loading the entire table into memory for large historical datasets.
+
+2. **Loop check before calling `create_recording_from_row()`** — dedup counter (`skipped_dedup`) is incremented cleanly in the loop via `continue`, not inside the function. Function's fast path is belt-and-suspenders.
+
+3. **`existing_urls` is optional, defaults to None** — CSV/Excel import callers pass no argument. DB fallback path is untouched.
+
+4. **Intra-batch dedup via set update** — after a successful create, the URL is added to `existing_urls` so a duplicate in the same batch is caught without a DB round trip.
+
+### Test count at end of session: 249 passing, 0 ruff findings
