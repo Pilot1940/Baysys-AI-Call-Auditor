@@ -116,3 +116,6 @@ SYNC_MIN_CALL_DURATION = config("SYNC_MIN_CALL_DURATION", default=20, cast=int)
 
 # Minutes after submission before a recording is considered stuck and eligible for polling
 POLL_STUCK_AFTER_MINUTES = config("POLL_STUCK_AFTER_MINUTES", default=30, cast=int)
+
+# Webhook IP allowlist — comma-separated; empty string means allow all
+SPEECH_PROVIDER_WEBHOOK_ALLOWED_IPS = config("SPEECH_PROVIDER_WEBHOOK_ALLOWED_IPS", default="")

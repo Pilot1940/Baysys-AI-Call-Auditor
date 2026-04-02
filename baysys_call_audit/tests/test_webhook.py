@@ -135,3 +135,45 @@ class ProviderWebhookViewTests(TestCase):
         flags = ComplianceFlag.objects.filter(recording__provider_resource_id="RES-EARLY")
         # No outside_hours from webhook — that's a metadata rule now
         self.assertFalse(flags.filter(flag_type="outside_hours").exists())
+
+
+class ProviderWebhookIPAllowlistTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.url = "/audit/webhook/provider/"
+
+    @override_settings(SPEECH_PROVIDER_WEBHOOK_ALLOWED_IPS="203.0.113.10,203.0.113.11")
+    def test_allowed_ip_via_remote_addr(self):
+        """Request from a whitelisted IP is passed through (hits 400 for empty payload, not 403)."""
+        resp = self.client.post(
+            self.url, {}, format="json",
+            REMOTE_ADDR="203.0.113.10",
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    @override_settings(SPEECH_PROVIDER_WEBHOOK_ALLOWED_IPS="203.0.113.10,203.0.113.11")
+    def test_allowed_ip_via_x_forwarded_for(self):
+        """First IP in X-Forwarded-For is checked against the allowlist."""
+        resp = self.client.post(
+            self.url, {}, format="json",
+            HTTP_X_FORWARDED_FOR="203.0.113.11, 10.0.0.1",
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    @override_settings(SPEECH_PROVIDER_WEBHOOK_ALLOWED_IPS="203.0.113.10")
+    def test_blocked_ip_returns_403(self):
+        """Request from an IP not in the allowlist is rejected with 403."""
+        resp = self.client.post(
+            self.url, {}, format="json",
+            REMOTE_ADDR="1.2.3.4",
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    @override_settings(SPEECH_PROVIDER_WEBHOOK_ALLOWED_IPS="")
+    def test_empty_setting_allows_all(self):
+        """Empty allowlist setting permits any IP (returns 400 for empty payload, not 403)."""
+        resp = self.client.post(
+            self.url, {}, format="json",
+            REMOTE_ADDR="1.2.3.4",
+        )
+        self.assertEqual(resp.status_code, 400)

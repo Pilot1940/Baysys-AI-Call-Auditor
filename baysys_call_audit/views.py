@@ -48,6 +48,14 @@ class ProviderWebhookView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        allowed_ips_raw = getattr(django_settings, "SPEECH_PROVIDER_WEBHOOK_ALLOWED_IPS", "")
+        if allowed_ips_raw:
+            allowed_ips = {ip.strip() for ip in allowed_ips_raw.split(",") if ip.strip()}
+            forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR", "")
+            client_ip = forwarded_for.split(",")[0].strip() if forwarded_for else request.META.get("REMOTE_ADDR", "")
+            if client_ip not in allowed_ips:
+                return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+
         payload = request.data
         if not payload:
             return Response(
