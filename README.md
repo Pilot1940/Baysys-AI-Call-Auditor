@@ -110,7 +110,7 @@ See `docs/OPERATIONS.md` for the full ops guide including cron setup, env var re
 ## Tests
 
 ```bash
-python manage.py test --settings=settings_test -v 0   # 249 tests, all passing
+python manage.py test --settings=settings_test -v 0   # 275 tests, all passing
 ruff check baysys_call_audit/                          # 0 findings
 ```
 

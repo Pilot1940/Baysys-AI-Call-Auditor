@@ -15,6 +15,7 @@ All other code references the provider generically via these functions:
 """
 import logging
 
+import newrelic.agent
 import requests
 from django.conf import settings
 
@@ -80,11 +81,17 @@ def submit_recording(
     resp = requests.post(url, data=payload, headers=_get_headers(), timeout=30)
 
     if resp.status_code != 200:
-        raise ProviderError(
+        exc = ProviderError(
             f"Submit failed: HTTP {resp.status_code}",
             status_code=resp.status_code,
             response_body=_safe_json(resp),
         )
+        newrelic.agent.record_custom_event('ProviderError', {
+            'endpoint': 'submit_recording',
+            'status_code': resp.status_code,
+            'message': str(exc)[:500],
+        })
+        raise exc
 
     data = resp.json()
     resource_id = data.get("resource_insight_id") or data.get("id")
@@ -114,11 +121,17 @@ def get_results(resource_id: str) -> dict:
     resp = requests.post(url, json=payload, headers=_get_headers(), timeout=30)
 
     if resp.status_code != 200:
-        raise ProviderError(
+        exc = ProviderError(
             f"Get results failed: HTTP {resp.status_code}",
             status_code=resp.status_code,
             response_body=_safe_json(resp),
         )
+        newrelic.agent.record_custom_event('ProviderError', {
+            'endpoint': 'get_results',
+            'status_code': resp.status_code,
+            'message': str(exc)[:500],
+        })
+        raise exc
 
     return resp.json()
 

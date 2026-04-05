@@ -1,0 +1,37 @@
+# New Relic APM configuration template.
+#
+# IMPORTANT: Do NOT put real licence keys in this file.
+# In production, prefer env vars over this file:
+#   NEW_RELIC_LICENSE_KEY, NEW_RELIC_APP_NAME, NEW_RELIC_ENVIRONMENT
+# When moving to K8s, use env vars exclusively via ConfigMap/Secret.
+#
+# To use this file:
+#   1. Copy to newrelic.ini (gitignored)
+#   2. Replace REPLACE_ME with your licence key
+#   3. Wrap gunicorn: NEW_RELIC_CONFIG_FILE=newrelic.ini newrelic-admin run-program gunicorn settings:wsgi
+#   4. Wrap management commands: NEW_RELIC_CONFIG_FILE=newrelic.ini newrelic-admin run-program python manage.py <command>
+
+[newrelic]
+license_key = REPLACE_ME
+app_name = BaySys-CallAudit-%(NEW_RELIC_ENVIRONMENT)s
+
+# Log to stdout for EC2 and K8s compatibility (no log file path needed)
+log_file = stdout
+log_level = info
+
+distributed_tracing.enabled = true
+
+# Obfuscate SQL so query values don't appear in traces
+transaction_tracer.record_sql = obfuscated
+
+# Don't add New Relic middleware manually — agent auto-detects Django
+# Adding it manually doubles instrumentation.
+
+[newrelic:development]
+monitor_mode = false
+
+[newrelic:staging]
+monitor_mode = true
+
+[newrelic:production]
+monitor_mode = true

@@ -23,6 +23,7 @@ from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import newrelic.agent
 import yaml
 from django.conf import settings
 
@@ -145,6 +146,9 @@ def check_metadata_compliance(
         flag = handler(recording, rule, call_counts_cache=call_counts_cache)
         if flag:
             flags.append(flag)
+            newrelic.agent.record_custom_metric(
+                f'Custom/Compliance/MetadataFlags/{flag.flag_type}', 1,
+            )
 
     return flags
 
@@ -276,6 +280,9 @@ def check_provider_compliance(recording: CallRecording, payload: dict) -> list[C
             evidence=str(restricted),
         )
         flags.append(flag)
+        newrelic.agent.record_custom_metric(
+            f'Custom/Compliance/ProviderFlags/{flag.flag_type}', 1,
+        )
 
     for rule in provider_rules:
         if not rule.get("enabled", True):
@@ -288,6 +295,9 @@ def check_provider_compliance(recording: CallRecording, payload: dict) -> list[C
         flag = handler(recording, rule)
         if flag:
             flags.append(flag)
+            newrelic.agent.record_custom_metric(
+                f'Custom/Compliance/ProviderFlags/{flag.flag_type}', 1,
+            )
 
     return flags
 
@@ -423,4 +433,5 @@ def compute_fatal_level(recording: CallRecording, provider_score) -> int:
     fatal_level = min(total_weight, 5)
     recording.fatal_level = fatal_level
     recording.save(update_fields=["fatal_level"])
+    newrelic.agent.record_custom_metric('Custom/Compliance/FatalLevel', fatal_level)
     return fatal_level

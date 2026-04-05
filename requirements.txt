@@ -7,4 +7,5 @@ requests>=2.31
 python-decouple>=3.8
 openpyxl>=3.1
 pyyaml>=6.0
+newrelic>=10.0
 ruff>=0.4

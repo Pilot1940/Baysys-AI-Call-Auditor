@@ -17,6 +17,8 @@ import logging
 import os
 import re
 import time
+
+import newrelic.agent
 from datetime import date, datetime, timedelta
 from functools import lru_cache
 
@@ -141,6 +143,7 @@ def map_sync_row(row_dict: dict) -> dict:
     }
 
 
+@newrelic.agent.background_task(name='run_sync_for_date')
 def run_sync_for_date(
     target_date: date | None = None,
     batch_size: int = 5000,
@@ -242,6 +245,14 @@ def run_sync_for_date(
             logger.exception("Error creating recording from row")
 
     counts["duration_seconds"] = round(time.monotonic() - start_time, 1)
+    newrelic.agent.record_custom_event('SyncCompleted', {
+        'target_date': str(target_date),
+        'fetched': counts['fetched'],
+        'created': counts['created'],
+        'skipped_dedup': counts['skipped_dedup'],
+        'skipped_validation': counts['skipped_validation'],
+        'duration_seconds': counts.get('duration_seconds', 0),
+    })
     return counts
 
 

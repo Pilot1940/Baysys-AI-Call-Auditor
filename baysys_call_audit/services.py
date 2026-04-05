@@ -10,6 +10,7 @@ Compliance logic lives in compliance.py (config-driven engine).
 """
 import logging
 
+import newrelic.agent
 from django.conf import settings
 from django.utils import timezone
 
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 # Ingestion: submit pending recordings to provider
 # ─────────────────────────────────────────────────────────────────────────────
 
+@newrelic.agent.background_task(name='submit_pending_recordings')
 def submit_pending_recordings(
     batch_size: int = 100,
     tiers: list[str] | None = None,
@@ -68,6 +70,11 @@ def submit_pending_recordings(
             continue
 
         try:
+            newrelic.agent.add_custom_attributes({
+                'recording_id': recording.pk,
+                'agent_id': recording.agent_id,
+                'submission_tier': recording.submission_tier,
+            })
             # Re-sign URL immediately before submission — stored URL may have expired
             try:
                 signed_url = get_signed_url(recording.recording_url)
@@ -90,6 +97,7 @@ def submit_pending_recordings(
                 "provider_resource_id", "status", "submitted_at",
             ])
             counts["submitted"] += 1
+            newrelic.agent.record_custom_metric('Custom/Pipeline/Recordings/Submitted', 1)
 
         except speech_provider.ProviderError as exc:
             recording.retry_count += 1
@@ -97,6 +105,7 @@ def submit_pending_recordings(
             recording.error_message = str(exc)
             recording.save(update_fields=["retry_count", "status", "error_message"])
             counts["failed"] += 1
+            newrelic.agent.record_custom_metric('Custom/Pipeline/Recordings/SubmitFailed', 1)
             logger.warning("Failed to submit recording %s: %s", recording.pk, exc)
 
     logger.info(
@@ -110,6 +119,7 @@ def submit_pending_recordings(
 # Webhook processing: handle provider callback
 # ─────────────────────────────────────────────────────────────────────────────
 
+@newrelic.agent.background_task(name='process_provider_webhook')
 def process_provider_webhook(payload: dict) -> CallRecording | None:
     """
     Process a provider webhook callback.
@@ -135,9 +145,16 @@ def process_provider_webhook(payload: dict) -> CallRecording | None:
         logger.warning("No CallRecording for resource_id=%s", resource_id)
         return None
 
+    newrelic.agent.add_custom_attributes({
+        'recording_id': recording.pk,
+        'agent_id': recording.agent_id,
+        'provider_resource_id': resource_id,
+    })
+
     # Idempotency: skip if already completed
     if recording.status == "completed":
         logger.info("Recording %s already completed, skipping", recording.pk)
+        newrelic.agent.record_custom_metric('Custom/Pipeline/Webhooks/IdempotencySkip', 1)
         return recording
 
     # Create transcript
@@ -156,6 +173,7 @@ def process_provider_webhook(payload: dict) -> CallRecording | None:
     recording.status = "completed"
     recording.completed_at = timezone.now()
     recording.save(update_fields=["status", "completed_at"])
+    newrelic.agent.record_custom_metric('Custom/Pipeline/Webhooks/Processed', 1)
 
     logger.info("Processed webhook for recording %s (resource_id=%s)", recording.pk, resource_id)
     return recording
@@ -234,6 +252,7 @@ def _find_subjective(subjective_data: list, parameter_name: str) -> str | None:
 # Own LLM scoring (placeholder — implementation is a future prompt)
 # ─────────────────────────────────────────────────────────────────────────────
 
+@newrelic.agent.background_task(name='run_own_llm_scoring')
 def run_own_llm_scoring(recording_id: int, template_name: str = "default") -> OwnLLMScore | None:
     """
     Placeholder for custom LLM scoring pipeline.

@@ -8,6 +8,7 @@ venv/
 
 # Environment
 .env
+newrelic.ini
 
 # IDE
 .vscode/

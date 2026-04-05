@@ -2,7 +2,7 @@
 
 ## System Overview
 
-BaySys Call Audit AI is a call monitoring system that processes recorded MP3 calls from Baysys.ai's debt collection process (on behalf of UVARCL). It transcribes audio via a Speech Analytics Provider (currently GreyLabs), scores calls against configurable templates, and flags RBI Code of Conduct compliance violations. The system handles ~18K recordings/day plus ~5K/day backfill from a 200K historical archive.
+BaySys Call Audit AI is a call monitoring system that processes recorded MP3 calls from Baysys.ai's debt collection process (on behalf of UVARCL). It transcribes audio via a Speech Analytics Provider (currently GreyLabs, swappable), scores calls against the **UVARCL Scorecard v2** (19 parameters, 7 FATALs — see `docs/SCORECARD.md`), and flags RBI Code of Conduct compliance violations. The system handles ~18K recordings/day plus ~5K/day backfill from a 200K historical archive.
 
 ---
 
@@ -415,6 +415,60 @@ A parameter is "triggered" when:
 4. Commit to git — audit trail complete
 
 The `content_hash` field provides audit integrity. If the hash doesn't match, the engine logs a WARNING but continues scoring.
+
+---
+
+## New Relic APM
+
+New Relic provides request-level tracing, database query visibility, external call monitoring, and custom business metrics.
+
+### Environment variables
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `NEW_RELIC_LICENSE_KEY` | (required) | Account licence key |
+| `NEW_RELIC_APP_NAME` | `BaySys-CallAudit-dev` | Use `-dev`, `-staging`, `-prod` suffix |
+| `NEW_RELIC_ENVIRONMENT` | `development` | `development` / `staging` / `production` |
+
+### Running with New Relic
+
+**Web server (gunicorn):**
+```bash
+NEW_RELIC_CONFIG_FILE=newrelic.ini newrelic-admin run-program gunicorn settings:wsgi --bind 0.0.0.0:8000
+```
+
+**Management commands (cron):**
+```bash
+# All cron commands must be wrapped with newrelic-admin
+NEW_RELIC_CONFIG_FILE=newrelic.ini newrelic-admin run-program python manage.py sync_call_logs
+NEW_RELIC_CONFIG_FILE=newrelic.ini newrelic-admin run-program python manage.py submit_recordings --tier immediate --batch-size 500
+NEW_RELIC_CONFIG_FILE=newrelic.ini newrelic-admin run-program python manage.py poll_stuck_recordings
+```
+
+### Auto-instrumented (no code needed)
+
+- All DRF API endpoints (request timing, throughput, error rate)
+- All database queries (ORM and raw SQL including `SYNC_QUERY`)
+- All outbound HTTP calls via `requests` library (GreyLabs/STT provider API calls)
+- Django middleware chain
+
+### Custom business metrics
+
+| Metric | Source file | What it tracks |
+|--------|-----------|----------------|
+| `Custom/Pipeline/Recordings/Submitted` | services.py | Recordings sent to provider |
+| `Custom/Pipeline/Recordings/SubmitFailed` | services.py | Provider submission failures |
+| `Custom/Pipeline/Webhooks/Processed` | services.py | Webhook callbacks processed |
+| `Custom/Compliance/MetadataFlags/{type}` | compliance.py | Compliance flags by type |
+| `Custom/Compliance/FatalLevel` | compliance.py | Fatal level distribution |
+| `SyncCompleted` (event) | ingestion.py | Daily sync health (row counts, duration) |
+| `ProviderError` (event) | speech_provider.py | Provider incident detection |
+
+### Kubernetes migration
+
+When moving to K8s: drop `newrelic.ini`, use env vars exclusively via ConfigMap (non-secret) + Secret (licence key). The agent respects env vars natively.
+
+Full plan: `docs/new-relic-telemetry-plan.md`
 
 ---
 

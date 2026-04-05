@@ -1,8 +1,8 @@
 # BaySys Call Audit AI — Code Repository Manifest
 
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
-**Last updated:** Session 9 (Perf Fix 2)
-**Test count:** 271 passing
+**Last updated:** Session 10 (Prompt H — New Relic APM)
+**Test count:** 283 passing
 **Ruff findings:** 0
 **Open issues:** TBD (issues created after push)
 
@@ -16,9 +16,10 @@
 | `settings.py` | Django settings — flat file, python-decouple for env vars, Supabase DB with `baysys_call_audit` schema |
 | `settings_test.py` | Test override — SQLite in-memory |
 | `urls.py` | Root URL config: `admin/` + `audit/` (includes app urls) |
-| `requirements.txt` | Python deps: Django, DRF, psycopg2-binary, requests, python-decouple, ruff |
+| `requirements.txt` | Python deps: Django, DRF, psycopg2-binary, requests, python-decouple, newrelic, ruff |
 | `.env.example` | Template for environment variables |
 | `.gitignore` | Standard Python/Node/Django ignores |
+| `newrelic.ini.example` | New Relic APM config template (no secrets; committed to git) |
 | `CLAUDE.md` | Build rules for Claude Code sessions |
 | `README.md` | Architecture overview, API reference, local dev guide |
 | `MANIFEST.md` | This file — code repository manifest |
@@ -161,7 +162,8 @@
 | `test_sync_api.py` | 9 | Sync API endpoint: RBAC, date parsing, dry-run, response format |
 | `test_submission_tiers.py` | 35 | Tier matching, tier assignment at creation, submit tier filter, S3 re-signing, submit_recordings command |
 | `test_poll_stuck_recordings.py` | 8 | poll_stuck_recordings command: query selection, threshold, recovery, errors, dry-run, batch-size |
-| **Total** | **271** | — |
+| `test_newrelic_instrumentation.py` | 8 | Verify `@background_task` decorators applied; NR API is callable as no-op without agent |
+| **Total** | **283** | — |
 
 ---
 
@@ -204,7 +206,10 @@
 
 | File | Purpose |
 |------|---------|
-| `OPERATIONS.md` | Ops guide: local setup, pipeline runs, troubleshooting |
+| `OPERATIONS.md` | Ops guide: local setup, pipeline runs, troubleshooting, New Relic APM |
+| `SCORECARD.md` | Canonical scoring rubric (19 params, 7 FATALs) |
+| `new-relic-telemetry-plan.md` | New Relic phased implementation plan (4 phases) |
+| `prompts/prompt-H-new-relic.md` | Claude Code prompt spec for New Relic instrumentation |
 | `speech-provider/api-reference.md` | Current provider (GreyLabs) API documentation |
 | `testing/test-guide.md` | Test execution guide |
 

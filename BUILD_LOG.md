@@ -3,7 +3,7 @@
 **Project:** BaySys Call Audit AI
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
 **Build start:** 2026-04-01
-**Last updated:** 2026-04-01 (Session 9)
+**Last updated:** 2026-04-05 (Session 11)
 **Build method:** Claude Code (Opus 4.6)
 
 ---
@@ -21,6 +21,38 @@
 | G | Webhook recovery polling + call duration + max calls thresholds | 2026-04-01 | #11, #12, #13 |
 | Perf-1 | pgbouncer fix: cursor.fetchall() before ORM loop | 2026-04-01 | — |
 | Perf-2 | O(1) max_calls_per_customer via pre-fetched call counts dict | 2026-04-01 | — |
+| **H** | **New Relic APM instrumentation** | **2026-04-05** | — |
+
+---
+
+## Session 11 — Prompt H: New Relic APM Instrumentation
+
+**Date:** 2026-04-05
+**Scope:** Add New Relic telemetry. Auto-instrumentation (Django views, DB, outbound HTTP) is handled by the agent; this session adds `@background_task` decorators, custom business metrics, custom events, and custom attributes.
+
+### Files created
+
+- `newrelic.ini.example` — APM config template (no secrets; env-var-first note included)
+- `baysys_call_audit/tests/test_newrelic_instrumentation.py` — 8 tests verifying decorators + no-op safety
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `services.py` | `import newrelic.agent`; `@background_task` on `submit_pending_recordings`, `process_provider_webhook`, `run_own_llm_scoring`; custom metrics `Submitted`/`SubmitFailed`/`Webhooks/Processed`/`Webhooks/IdempotencySkip`; custom attributes in submission loop and after webhook lookup |
+| `ingestion.py` | `import newrelic.agent`; `@background_task` on `run_sync_for_date`; `record_custom_event('SyncCompleted', ...)` at end of sync |
+| `compliance.py` | `import newrelic.agent`; custom metrics `MetadataFlags/{flag_type}` and `ProviderFlags/{flag_type}` per flag created; `FatalLevel` metric after `compute_fatal_level` |
+| `speech_provider.py` | `import newrelic.agent`; `record_custom_event('ProviderError', ...)` on `ProviderError` in `submit_recording` and `get_results` |
+| `views.py` | `import newrelic.agent`; custom attributes in `ProviderWebhookView.post`, `RecordingDetailView.get`, `SyncCallLogsView.post` |
+| `MANIFEST.md` | Added `newrelic.ini.example`; added `test_newrelic_instrumentation.py`; updated test count to 283 |
+| `BUILD_LOG.md` | This entry |
+
+### Test results
+
+```
+Ran 283 tests in 0.242s — OK
+ruff check baysys_call_audit/ — 0 findings
+```
 
 ---
 

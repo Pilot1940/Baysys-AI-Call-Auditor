@@ -13,6 +13,7 @@ Views:
 import logging
 from datetime import date
 
+import newrelic.agent
 from django.conf import settings as django_settings
 from django.db.models import Avg
 from rest_framework import status
@@ -48,6 +49,7 @@ class ProviderWebhookView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        newrelic.agent.add_custom_attributes({'webhook_source': 'provider'})
         allowed_ips_raw = getattr(django_settings, "SPEECH_PROVIDER_WEBHOOK_ALLOWED_IPS", "")
         if allowed_ips_raw:
             allowed_ips = {ip.strip() for ip in allowed_ips_raw.split(",") if ip.strip()}
@@ -131,6 +133,10 @@ class RecordingDetailView(AuditPermissionMixin, APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        newrelic.agent.add_custom_attributes({
+            'recording_id': recording.pk,
+            'agent_id': recording.agent_id,
+        })
         serializer = CallDetailSerializer(recording)
         return Response(serializer.data)
 
@@ -255,6 +261,10 @@ class SyncCallLogsView(AuditPermissionMixin, APIView):
 
         batch_size = data.get("batch_size", 5000)
         dry_run = data.get("dry_run", False)
+        newrelic.agent.add_custom_attributes({
+            'sync_date': str(target_date),
+            'dry_run': dry_run,
+        })
 
         user_id = getattr(request.user, "user_id", None)
         logger.info("Sync triggered via API by user_id=%s for date=%s", user_id, target_date)
