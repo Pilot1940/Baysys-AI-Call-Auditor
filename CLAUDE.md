@@ -62,7 +62,7 @@ All interaction with the speech analytics provider goes through `speech_provider
 ### 2. `crm_adapter.py` is the single mock/prod seam
 Same pattern as Trainer. `AUDIT_AUTH_BACKEND=mock` in dev, `=crm` in prod. All CRM imports inside function bodies only with `# noqa: PLC0415`.
 
-### 3. Test gate: 275 tests passing, 0 ruff findings
+### 3. Test gate: 283 tests passing, 0 ruff findings
 Before any commit or review:
 ```bash
 python manage.py test --settings=settings_test -v 0   # must pass
@@ -92,9 +92,9 @@ Every session that modifies code MUST update MANIFEST.md, BUILD_LOG.md, and docs
 
 ---
 
-## Current state (as of 2026-04-01)
+## Current state (as of 2026-04-05)
 
-- **275 tests passing, 0 ruff findings**
+- **283 tests passing, 0 ruff findings**
 - 5 Django models: CallRecording, CallTranscript, ProviderScore, ComplianceFlag, OwnLLMScore
 - Migrations 0001–0004 applied
 - **PC-Supabase fully configured:** `uvarcl_live.call_logs` (500K rows), `uvarcl_live.users` (662 rows, anonymised), `baysys_call_audit.*` all 5 tables created. Sync can be run end-to-end with no RDS connection needed.
@@ -113,6 +113,7 @@ Every session that modifies code MUST update MANIFEST.md, BUILD_LOG.md, and docs
 - **SYNC_QUERY uses `call_start_time`**: actual call start (not `created_at` insert timestamp)
 - React scaffold (Vite + TS + Tailwind) with pages, types, API client, mock auth
 - AUDIT_AUTH_BACKEND=mock for dev, =crm for production
+- **New Relic APM instrumented (Prompt H complete)**: `@background_task` decorators on `submit_pending_recordings`, `process_provider_webhook`, `run_own_llm_scoring`, `run_sync_for_date`. Custom metrics: `Custom/Pipeline/Recordings/Submitted`, `Custom/Pipeline/Recordings/SubmitFailed`, `Custom/Pipeline/Webhooks/Processed`, `Custom/Pipeline/Webhooks/IdempotencySkip`, `Custom/Compliance/MetadataFlags/{type}`, `Custom/Compliance/ProviderFlags/{type}`, `Custom/Compliance/FatalLevel`. Custom events: `SyncCompleted`, `ProviderError`. Custom attributes in webhook, submission, and detail views. `newrelic.ini.example` committed at project root.
 
 ---
 
@@ -181,5 +182,6 @@ See `docs/new-relic-telemetry-plan.md` for phased implementation details, alert 
 | E | recording_url URLField→CharField, validate_row URL check removed, SYNC_QUERY→call_start_time, IST compliance conversion, migration 0004, 17 new tests |
 | F | Bulk dedup pre-fetch: O(1) per row, run_sync_for_date pre-fetches existing URLs, 8 new tests |
 | G | poll_stuck_recordings command, SYNC_MIN_CALL_DURATION (20s), max_calls default (15), 16 new tests |
+| H | New Relic APM instrumentation — complete. `@background_task`, custom metrics/events/attributes, `newrelic.ini.example`, 8 instrumentation tests |
 
 Full details in `BUILD_LOG.md`.

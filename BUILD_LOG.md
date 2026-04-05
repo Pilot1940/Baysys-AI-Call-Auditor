@@ -28,24 +28,29 @@
 ## Session 11 — Prompt H: New Relic APM Instrumentation
 
 **Date:** 2026-04-05
-**Scope:** Add New Relic telemetry. Auto-instrumentation (Django views, DB, outbound HTTP) is handled by the agent; this session adds `@background_task` decorators, custom business metrics, custom events, and custom attributes.
+**Scope:** New Relic APM instrumentation — full implementation.
 
 ### Files created
 
-- `newrelic.ini.example` — APM config template (no secrets; env-var-first note included)
-- `baysys_call_audit/tests/test_newrelic_instrumentation.py` — 8 tests verifying decorators + no-op safety
+- `newrelic.ini.example` — APM config template (no secrets; env-var-first; development/staging/production stanzas)
+- `baysys_call_audit/tests/test_newrelic_instrumentation.py` — 8 tests verifying `@background_task` decorators + no-op safety
 
 ### Files modified
 
 | File | Changes |
 |------|---------|
-| `services.py` | `import newrelic.agent`; `@background_task` on `submit_pending_recordings`, `process_provider_webhook`, `run_own_llm_scoring`; custom metrics `Submitted`/`SubmitFailed`/`Webhooks/Processed`/`Webhooks/IdempotencySkip`; custom attributes in submission loop and after webhook lookup |
-| `ingestion.py` | `import newrelic.agent`; `@background_task` on `run_sync_for_date`; `record_custom_event('SyncCompleted', ...)` at end of sync |
-| `compliance.py` | `import newrelic.agent`; custom metrics `MetadataFlags/{flag_type}` and `ProviderFlags/{flag_type}` per flag created; `FatalLevel` metric after `compute_fatal_level` |
-| `speech_provider.py` | `import newrelic.agent`; `record_custom_event('ProviderError', ...)` on `ProviderError` in `submit_recording` and `get_results` |
-| `views.py` | `import newrelic.agent`; custom attributes in `ProviderWebhookView.post`, `RecordingDetailView.get`, `SyncCallLogsView.post` |
-| `MANIFEST.md` | Added `newrelic.ini.example`; added `test_newrelic_instrumentation.py`; updated test count to 283 |
-| `BUILD_LOG.md` | This entry |
+| `services.py` | `import newrelic.agent`; `@background_task` on `submit_pending_recordings`, `process_provider_webhook`, `run_own_llm_scoring`; `add_custom_attributes` in submission loop and webhook lookup; `record_custom_metric` for `Submitted`, `SubmitFailed`, `Webhooks/Processed`, `Webhooks/IdempotencySkip` |
+| `ingestion.py` | `import newrelic.agent`; `@background_task` on `run_sync_for_date`; `record_custom_event('SyncCompleted', {...})` at end of sync including target_date, fetched, created, skipped_dedup, skipped_validation, duration_seconds |
+| `compliance.py` | `import newrelic.agent`; `record_custom_metric('Custom/Compliance/MetadataFlags/{flag_type}', 1)` per metadata flag; `record_custom_metric('Custom/Compliance/ProviderFlags/{flag_type}', 1)` per provider flag; `record_custom_metric('Custom/Compliance/FatalLevel', fatal_level)` in `compute_fatal_level` |
+| `speech_provider.py` | `import newrelic.agent`; `record_custom_event('ProviderError', {'endpoint', 'status_code', 'message'})` on HTTP errors in `submit_recording` and `get_results` |
+| `views.py` | `import newrelic.agent`; `add_custom_attributes({'webhook_source': 'provider'})` in `ProviderWebhookView`; `add_custom_attributes({'recording_id', 'agent_id'})` in `RecordingDetailView`; `add_custom_attributes({'sync_date', 'dry_run'})` in `SyncCallLogsView` |
+| `CLAUDE.md` | Added Observability — New Relic APM section (9 build rules) |
+| `docs/OPERATIONS.md` | Added New Relic APM section (env vars, cron wrappers, custom metrics table, K8s migration note) |
+| `requirements.txt` | Added `newrelic>=10.0` |
+| `.env.example` | Added `NEW_RELIC_LICENSE_KEY`, `NEW_RELIC_APP_NAME`, `NEW_RELIC_ENVIRONMENT` |
+| `.gitignore` | Added `newrelic.ini` |
+| `docs/new-relic-telemetry-plan.md` | Created — 4-phase implementation plan with alert definitions |
+| `docs/prompts/prompt-H-new-relic.md` | Created — Claude Code prompt spec (8 tasks, acceptance criteria) |
 
 ### Test results
 

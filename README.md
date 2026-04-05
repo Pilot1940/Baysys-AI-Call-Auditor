@@ -105,12 +105,12 @@ npm install
 npm run dev  # http://localhost:5173
 ```
 
-See `docs/OPERATIONS.md` for the full ops guide including cron setup, env var reference, and troubleshooting.
+See `docs/OPERATIONS.md` for the full ops guide including cron setup, env var reference, New Relic APM setup, and troubleshooting.
 
 ## Tests
 
 ```bash
-python manage.py test --settings=settings_test -v 0   # 275 tests, all passing
+python manage.py test --settings=settings_test -v 0   # 283 tests, all passing
 ruff check baysys_call_audit/                          # 0 findings
 ```
 
@@ -119,4 +119,5 @@ ruff check baysys_call_audit/                          # 0 findings
 - **Backend:** Django 5.0, Django REST Framework, PostgreSQL (Supabase)
 - **Frontend:** React 18, Vite, TypeScript, Tailwind CSS
 - **Provider:** GreyLabs Speech Analytics API (swappable via `speech_provider.py`)
+- **Observability:** New Relic APM (auto-instrumentation + custom business metrics)
 - **Linter:** ruff

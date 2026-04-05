@@ -1,7 +1,7 @@
 # BaySys Call Audit AI — Code Repository Manifest
 
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
-**Last updated:** Session 10 (Prompt H — New Relic APM)
+**Last updated:** Session 10 (Prompt H — New Relic APM instrumentation — complete)
 **Test count:** 283 passing
 **Ruff findings:** 0
 **Open issues:** TBD (issues created after push)
@@ -16,7 +16,7 @@
 | `settings.py` | Django settings — flat file, python-decouple for env vars, Supabase DB with `baysys_call_audit` schema |
 | `settings_test.py` | Test override — SQLite in-memory |
 | `urls.py` | Root URL config: `admin/` + `audit/` (includes app urls) |
-| `requirements.txt` | Python deps: Django, DRF, psycopg2-binary, requests, python-decouple, newrelic, ruff |
+| `requirements.txt` | Python deps: Django, DRF, django-cors-headers, psycopg2-binary, dj-database-url, requests, python-decouple, openpyxl, pyyaml, newrelic, ruff |
 | `.env.example` | Template for environment variables |
 | `.gitignore` | Standard Python/Node/Django ignores |
 | `newrelic.ini.example` | New Relic APM config template (no secrets; committed to git) |
@@ -148,21 +148,21 @@
 
 | File | Tests | Coverage |
 |------|-------|----------|
-| `test_models.py` | 18 | All 5 models: CRUD, constraints, str, compute_percentage |
-| `test_speech_provider.py` | 12 | All 6 provider functions: success + error paths |
-| `test_webhook.py` | 8 | Webhook receiver: success, idempotency, compliance flags, edge cases |
+| `test_models.py` | 21 | All 5 models: CRUD, constraints, str, compute_percentage |
+| `test_speech_provider.py` | 10 | All 6 provider functions: success + error paths |
+| `test_webhook.py` | 12 | Webhook receiver: success, idempotency, compliance flags, edge cases |
 | `test_services.py` | 11 | Submission pipeline, webhook processing, LLM scoring placeholder |
-| `test_views.py` | 14 | All API views: list, detail, dashboard, compliance flags, pagination, filters |
-| `test_crm_adapter.py` | 7 | All 6 adapter functions in mock mode |
-| `test_ingestion.py` | 35 | Shared ingestion: validate_row, parse_datetime, normalize_column, create_recording_from_row, existing_urls fast-path dedup, SYNC_QUERY param count |
-| `test_sync_call_logs.py` | 16 | sync_call_logs command: mapping, date args, dedup, dry-run, batch-size, pre-fetch dedup, intra-batch dedup, min_duration param |
-| `test_import_recordings.py` | 24 | import_recordings command + DRF import endpoint: CSV parsing, dedup, RBAC, dry-run, errors |
-| `test_compliance.py` | 45 | Compliance engine: all metadata + provider rules, config loading, holidays, unknown types, max_calls default 15, call_counts_cache paths |
+| `test_views.py` | 13 | All API views: list, detail, dashboard, compliance flags, pagination, filters |
+| `test_crm_adapter.py` | 10 | All 7 adapter functions in mock mode |
+| `test_ingestion.py` | 47 | Shared ingestion: validate_row, parse_datetime, normalize_column, create_recording_from_row, existing_urls fast-path dedup, call_counts_cache, SYNC_QUERY param count |
+| `test_sync_call_logs.py` | 18 | sync_call_logs command: mapping, date args, dedup, dry-run, batch-size, pre-fetch dedup, intra-batch dedup, min_duration param |
+| `test_import_recordings.py` | 18 | import_recordings command + DRF import endpoint: CSV parsing, dedup, RBAC, dry-run, errors |
+| `test_compliance.py` | 48 | Compliance engine: all metadata + provider rules, config loading, holidays, unknown types, max_calls default 15, call_counts_cache paths |
 | `test_fatal_level.py` | 14 | Fatal level computation, content hash, update_fatal_level_hash command |
 | `test_sync_api.py` | 9 | Sync API endpoint: RBAC, date parsing, dry-run, response format |
 | `test_submission_tiers.py` | 35 | Tier matching, tier assignment at creation, submit tier filter, S3 re-signing, submit_recordings command |
-| `test_poll_stuck_recordings.py` | 8 | poll_stuck_recordings command: query selection, threshold, recovery, errors, dry-run, batch-size |
-| `test_newrelic_instrumentation.py` | 8 | Verify `@background_task` decorators applied; NR API is callable as no-op without agent |
+| `test_poll_stuck_recordings.py` | 9 | poll_stuck_recordings command: query selection, threshold, recovery, errors, dry-run, batch-size |
+| `test_newrelic_instrumentation.py` | 8 | `@background_task` decorators verified; NR API callable as no-op without agent |
 | **Total** | **283** | — |
 
 ---
@@ -209,7 +209,7 @@
 | `OPERATIONS.md` | Ops guide: local setup, pipeline runs, troubleshooting, New Relic APM |
 | `SCORECARD.md` | Canonical scoring rubric (19 params, 7 FATALs) |
 | `new-relic-telemetry-plan.md` | New Relic phased implementation plan (4 phases) |
-| `prompts/prompt-H-new-relic.md` | Claude Code prompt spec for New Relic instrumentation |
+| `prompts/prompt-H-new-relic.md` | Claude Code prompt spec for New Relic instrumentation (Prompt H executed — complete) |
 | `speech-provider/api-reference.md` | Current provider (GreyLabs) API documentation |
 | `testing/test-guide.md` | Test execution guide |
 
