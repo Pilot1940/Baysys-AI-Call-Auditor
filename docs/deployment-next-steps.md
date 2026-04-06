@@ -1,7 +1,14 @@
 # BaySys Call Audit AI — Deployment Next Steps
 
 **Date:** 2026-04-07
-**Status:** Code complete (302 tests, 0 linting issues). Ready for merge and UAT.
+**Status:** Backend complete (302 tests, 0 linting issues). Phase 1 UI in progress (Prompt M). Ready for crm_apis merge and GreyLabs UAT in parallel.
+
+**What product team gets in Phase 1 UI:**
+- Recordings list with status, agent, tier, fatal level, compliance flags
+- Call detail page with audio player (plays the actual call)
+- Metadata compliance flags already visible (calling hours, Sunday, holiday, max calls violations)
+- Placeholder sections for transcript and scores — fill in automatically once GreyLabs processes the call
+- No curl or secret tokens needed once logged in
 
 ---
 
