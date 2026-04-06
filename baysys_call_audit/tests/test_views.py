@@ -2,6 +2,7 @@
 from datetime import datetime, timezone as tz
 
 from django.test import TestCase
+from django.urls import reverse
 from rest_framework.test import APIClient
 
 from baysys_call_audit.models import (
@@ -27,37 +28,38 @@ def _make_recording(**kwargs):
 class RecordingListViewTests(TestCase):
     def setUp(self):
         self.client = APIClient()
+        self.url = reverse("baysys_call_audit:recording-list")
 
     def test_list_recordings(self):
         _make_recording()
         _make_recording(agent_id="A002", agent_name="Agent Two")
-        resp = self.client.get("/audit/recordings/")
+        resp = self.client.get(self.url)
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data["pagination"]["total_count"], 2)
 
     def test_filter_by_status(self):
         _make_recording(status="completed")
         _make_recording(status="pending")
-        resp = self.client.get("/audit/recordings/?status=completed")
+        resp = self.client.get(self.url + "?status=completed")
         self.assertEqual(resp.data["pagination"]["total_count"], 1)
 
     def test_filter_by_agent_id(self):
         _make_recording(agent_id="A001")
         _make_recording(agent_id="A002")
-        resp = self.client.get("/audit/recordings/?agent_id=A001")
+        resp = self.client.get(self.url + "?agent_id=A001")
         self.assertEqual(resp.data["pagination"]["total_count"], 1)
 
     def test_pagination(self):
         for i in range(30):
             _make_recording(agent_id=f"A{i:03d}")
-        resp = self.client.get("/audit/recordings/?page=1&page_size=10")
+        resp = self.client.get(self.url + "?page=1&page_size=10")
         self.assertEqual(len(resp.data["results"]), 10)
         self.assertEqual(resp.data["pagination"]["total_pages"], 3)
 
     def test_date_range_filter(self):
         _make_recording(recording_datetime=datetime(2026, 3, 15, 10, 0, tzinfo=tz.utc))
         _make_recording(recording_datetime=datetime(2026, 4, 1, 10, 0, tzinfo=tz.utc))
-        resp = self.client.get("/audit/recordings/?date_from=2026-04-01")
+        resp = self.client.get(self.url + "?date_from=2026-04-01")
         self.assertEqual(resp.data["pagination"]["total_count"], 1)
 
 
@@ -68,19 +70,22 @@ class RecordingDetailViewTests(TestCase):
     def test_get_detail(self):
         r = _make_recording()
         CallTranscript.objects.create(recording=r, transcript_text="test transcript")
-        resp = self.client.get(f"/audit/recordings/{r.pk}/")
+        url = reverse("baysys_call_audit:recording-detail", kwargs={"recording_id": r.pk})
+        resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data["agent_name"], "Test Agent")
         self.assertIsNotNone(resp.data["transcript"])
 
     def test_get_detail_not_found(self):
-        resp = self.client.get("/audit/recordings/9999/")
+        url = reverse("baysys_call_audit:recording-detail", kwargs={"recording_id": 9999})
+        resp = self.client.get(url)
         self.assertEqual(resp.status_code, 404)
 
     def test_detail_includes_scores(self):
         r = _make_recording(status="completed")
         ProviderScore.objects.create(recording=r, template_id="TPL-001")
-        resp = self.client.get(f"/audit/recordings/{r.pk}/")
+        url = reverse("baysys_call_audit:recording-detail", kwargs={"recording_id": r.pk})
+        resp = self.client.get(url)
         self.assertEqual(len(resp.data["provider_scores"]), 1)
 
     def test_detail_includes_flags(self):
@@ -89,16 +94,18 @@ class RecordingDetailViewTests(TestCase):
             recording=r, flag_type="outside_hours", severity="critical",
             description="test",
         )
-        resp = self.client.get(f"/audit/recordings/{r.pk}/")
+        url = reverse("baysys_call_audit:recording-detail", kwargs={"recording_id": r.pk})
+        resp = self.client.get(url)
         self.assertEqual(len(resp.data["compliance_flags"]), 1)
 
 
 class DashboardSummaryViewTests(TestCase):
     def setUp(self):
         self.client = APIClient()
+        self.url = reverse("baysys_call_audit:dashboard-summary")
 
     def test_summary_empty(self):
-        resp = self.client.get("/audit/dashboard/summary/")
+        resp = self.client.get(self.url)
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data["total_recordings"], 0)
 
@@ -114,7 +121,7 @@ class DashboardSummaryViewTests(TestCase):
             description="test",
         )
 
-        resp = self.client.get("/audit/dashboard/summary/")
+        resp = self.client.get(self.url)
         self.assertEqual(resp.data["total_recordings"], 2)
         self.assertEqual(resp.data["completed"], 1)
         self.assertEqual(resp.data["pending"], 1)
@@ -125,6 +132,7 @@ class DashboardSummaryViewTests(TestCase):
 class ComplianceFlagListViewTests(TestCase):
     def setUp(self):
         self.client = APIClient()
+        self.url = reverse("baysys_call_audit:compliance-flag-list")
 
     def test_list_flags(self):
         r = _make_recording()
@@ -136,7 +144,7 @@ class ComplianceFlagListViewTests(TestCase):
             recording=r, flag_type="restricted_keyword", severity="high",
             description="test2",
         )
-        resp = self.client.get("/audit/compliance-flags/")
+        resp = self.client.get(self.url)
         self.assertEqual(resp.data["pagination"]["total_count"], 2)
 
     def test_filter_by_severity(self):
@@ -149,5 +157,5 @@ class ComplianceFlagListViewTests(TestCase):
             recording=r, flag_type="other", severity="low",
             description="test",
         )
-        resp = self.client.get("/audit/compliance-flags/?severity=critical")
+        resp = self.client.get(self.url + "?severity=critical")
         self.assertEqual(resp.data["pagination"]["total_count"], 1)

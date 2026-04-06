@@ -66,15 +66,22 @@ Same role IDs as Voice Trainer: 1=Admin, 2=Manager/TL, 3=Agent, 4=Supervisor, 5=
 
 ## API endpoints
 
+All paths are prefixed with `AUDIT_URL_SECRET` — e.g. `/audit/<URL_SECRET>/recordings/`.
+
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
-| POST | `/audit/webhook/provider/` | None | Provider callback receiver |
-| POST | `/audit/recordings/sync/` | Admin/Supervisor | On-demand sync (failsafe) |
-| POST | `/audit/recordings/import/` | Admin/Manager | CSV/Excel upload |
-| GET | `/audit/recordings/` | Yes | Paginated recording list |
-| GET | `/audit/recordings/<id>/` | Yes | Recording detail with transcript, scores, flags |
-| GET | `/audit/dashboard/summary/` | Yes | Aggregate dashboard stats |
-| GET | `/audit/compliance-flags/` | Yes | Compliance flag list |
+| POST | `/audit/<S>/webhook/provider/` | None | Provider callback receiver |
+| POST | `/audit/<S>/recordings/sync/` | Admin/Supervisor | On-demand sync (failsafe) |
+| POST | `/audit/<S>/recordings/import/` | Admin/Manager | CSV/Excel upload |
+| POST | `/audit/<S>/recordings/submit/` | Admin/Manager | Submit pending recordings to provider |
+| POST | `/audit/<S>/recordings/poll/` | Admin/Manager | Poll provider for stuck recordings |
+| GET | `/audit/<S>/recordings/` | Yes | Paginated recording list |
+| GET | `/audit/<S>/recordings/<id>/` | Yes | Recording detail with transcript, scores, flags |
+| GET | `/audit/<S>/dashboard/summary/` | Yes | Aggregate dashboard stats |
+| GET | `/audit/<S>/compliance-flags/` | Yes | Compliance flag list |
+| GET | `/audit/<S>/admin/status/?token=<AUDIT_STATUS_SECRET>` | Token | Health check: migrations, git, recording activity, env vars |
+
+`<S>` = value of `AUDIT_URL_SECRET` env var.
 
 ## Management commands
 
@@ -110,7 +117,7 @@ See `docs/OPERATIONS.md` for the full ops guide including cron setup, env var re
 ## Tests
 
 ```bash
-python manage.py test --settings=settings_test -v 0   # 283 tests, all passing
+python manage.py test --settings=settings_test -v 0   # 302 tests, all passing
 ruff check baysys_call_audit/                          # 0 findings
 ```
 

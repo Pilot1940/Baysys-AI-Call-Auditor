@@ -3,7 +3,7 @@
 **Project:** BaySys Call Audit AI
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
 **Build start:** 2026-04-01
-**Last updated:** 2026-04-05 (Session 11)
+**Last updated:** 2026-04-07 (Session 14)
 **Build method:** Claude Code (Opus 4.6)
 
 ---
@@ -22,6 +22,94 @@
 | Perf-1 | pgbouncer fix: cursor.fetchall() before ORM loop | 2026-04-01 | — |
 | Perf-2 | O(1) max_calls_per_customer via pre-fetched call counts dict | 2026-04-01 | — |
 | **H** | **New Relic APM instrumentation** | **2026-04-05** | — |
+| **I** | **Submit & Poll HTTP endpoints** | **2026-04-07** | — |
+| **K** | **URL secret prefix** | **2026-04-07** | — |
+| **L** | **System status / health check endpoint** | **2026-04-07** | — |
+
+---
+
+## Session 14 — Prompt L: System Status / Health Check Endpoint
+
+**Date:** 2026-04-07
+**Scope:** `GET /audit/<URL_SECRET>/admin/status/?token=<AUDIT_STATUS_SECRET>` — read-only health snapshot with token auth, migration state, recording activity, env var presence, NR event.
+
+### Files created
+
+- `baysys_call_audit/tests/test_system_status.py` — 8 tests covering token auth, top-level keys, DB query, env_vars, migrations
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `views.py` | Added `_build_recording_activity()` (uses `completed_at`/`status=completed`), `_AUDIT_ENV_VAR_KEYS`, `_fire_nr_audit_status_event()`, `SystemStatusView` (Django `View`, hmac token auth, migrations, backend, frontend, NR event); added imports: `hmac`, `json`, `os`, `Count`, `JsonResponse`, `timezone`, `View` |
+| `urls.py` | Added `admin/status/` → `SystemStatusView`; imported `SystemStatusView` |
+| `settings.py` | Added `AUDIT_STATUS_SECRET = config("AUDIT_STATUS_SECRET", default="dev-status-secret")` |
+| `.env.example` | Added `AUDIT_STATUS_SECRET=dev-status-secret` with comment |
+| `MANIFEST.md` | Updated views.py + urls.py rows; added test_system_status.py row; total 294 → 302 |
+| `BUILD_LOG.md` | This entry |
+| `CLAUDE.md` | Updated test gate + current state |
+
+### Notes
+
+- Auth uses `getattr(settings, "AUDIT_STATUS_SECRET", "")` (not `os.environ.get`) so `override_settings` works in tests. NR helpers still use `os.environ.get` since they short-circuit when keys are absent.
+- `_build_recording_activity` uses `completed_at` / `status=completed` — there is no `scored_at` or `scored` status in the Call Auditor model.
+- Endpoint is a plain Django `View` (not DRF `APIView`) to avoid DRF auth overhead on a monitoring endpoint.
+
+---
+
+## Session 13 — Prompt K: URL Secret Prefix
+
+**Date:** 2026-04-07
+**Scope:** All audit endpoints hidden behind a configurable secret URL segment (`AUDIT_URL_SECRET`). No changes to app-level URL patterns.
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `settings.py` | Added `AUDIT_URL_SECRET = config("AUDIT_URL_SECRET", default="dev-secret")` |
+| `urls.py` (root) | Path prefix changed from `"audit/"` to `f"audit/{settings.AUDIT_URL_SECRET}/"` |
+| `.env.example` | Added `AUDIT_URL_SECRET=dev-secret`; updated `SPEECH_PROVIDER_CALLBACK_URL` comment to note secret must be included |
+| `tests/test_views.py` | Replaced hardcoded `/audit/...` paths with `reverse("baysys_call_audit:<name>")` |
+| `tests/test_webhook.py` | Replaced hardcoded `/audit/webhook/provider/` with `reverse("baysys_call_audit:provider-webhook")` |
+| `MANIFEST.md` | Updated `.env.example` row to note `AUDIT_URL_SECRET` |
+| `BUILD_LOG.md` | This entry |
+| `CLAUDE.md` | Added `AUDIT_URL_SECRET` note |
+
+### Notes
+
+- `baysys_call_audit/urls.py` is untouched — prefix applied at root level only.
+- Tests using `APIRequestFactory` + direct view calls (test_sync_api, test_import_recordings, test_submit_api, test_poll_stuck_recordings) were not modified — the URL string in `factory.post(...)` is metadata only, not used for routing.
+- Tests using `APIClient` (test_views, test_webhook) now use `reverse()` so they remain correct regardless of the prefix value.
+- `settings.py` already had `import os` (unused, pre-existing). Out of ruff scope (`baysys_call_audit/`).
+
+---
+
+## Session 12 — Prompt I: Submit & Poll HTTP Endpoints
+
+**Date:** 2026-04-07
+**Scope:** Extract `run_poll_stuck_recordings()` into services.py; add `SubmitRecordingsView` and `PollStuckRecordingsView` endpoints; 11 new tests.
+
+### Files created
+
+- `baysys_call_audit/tests/test_submit_api.py` — 11 tests for both new views
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `services.py` | Added `run_poll_stuck_recordings(batch_size, dry_run)` with `@background_task` decorator; updated module docstring |
+| `management/commands/poll_stuck_recordings.py` | Refactored `handle()` to call `run_poll_stuck_recordings()` — all logic moved to services; removed now-unused `speech_provider`, `CallRecording`, `_normalise_provider_payload`, `process_provider_webhook` imports |
+| `views.py` | Added `SubmitRecordingsView` (`POST /audit/recordings/submit/`), `PollStuckRecordingsView` (`POST /audit/recordings/poll/`); imported `IsAuthenticated`, `submit_pending_recordings`, `run_poll_stuck_recordings`; updated module docstring |
+| `urls.py` | Added `recordings/submit/` and `recordings/poll/` routes; imported both new views |
+| `tests/test_poll_stuck_recordings.py` | Updated all patch paths from command module to `baysys_call_audit.services.*` (logic moved to services.py) |
+| `MANIFEST.md` | Updated services.py, views.py, urls.py rows; added test_submit_api.py row; total 283 → 294 |
+| `BUILD_LOG.md` | This entry |
+| `CLAUDE.md` | Test gate 283 → 294 |
+
+### Notes
+
+- DRF coerces `NotAuthenticated` (401) → 403 when no `WWW-Authenticate` header is provided (`MockCrmAuth` has no `authenticate_header()`). Tests assert 403 for the unauthenticated case and include an inline comment explaining the behaviour.
+- `run_poll_stuck_recordings()` calling `process_provider_webhook()` (also `@background_task`) is safe — NR agent nests transactions without creating a new root transaction.
 
 ---
 

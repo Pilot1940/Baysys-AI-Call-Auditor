@@ -9,15 +9,24 @@ Views:
   - ComplianceFlagListView — compliance flags filtered by recording (auth + RBAC)
   - RecordingImportView — CSV/Excel upload (Admin/Manager)
   - SyncCallLogsView — failsafe sync trigger (Admin/Supervisor)
+  - SubmitRecordingsView — trigger batch submission to provider (Admin/Manager)
+  - PollStuckRecordingsView — poll provider for stuck recordings (Admin/Manager)
+  - SystemStatusView — read-only health snapshot, token-auth via ?token= query param
 """
+import hmac
+import json
 import logging
+import os
 from datetime import date
 
 import newrelic.agent
 from django.conf import settings as django_settings
-from django.db.models import Avg
+from django.db.models import Avg, Count
+from django.http import JsonResponse
+from django.utils import timezone
+from django.views import View
 from rest_framework import status
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -30,7 +39,7 @@ from .serializers import (
     DashboardSummarySerializer,
 )
 from .ingestion import create_recording_from_row, normalize_column_name, run_sync_for_date, validate_row
-from .services import process_provider_webhook
+from .services import process_provider_webhook, run_poll_stuck_recordings, submit_pending_recordings
 
 logger = logging.getLogger(__name__)
 
@@ -418,3 +427,241 @@ class RecordingImportView(AuditPermissionMixin, APIView):
             rows.append(row_dict)
         wb.close()
         return rows
+
+
+class SubmitRecordingsView(AuditPermissionMixin, APIView):
+    """
+    POST /audit/recordings/submit/
+    Trigger batch submission of pending recordings to the speech provider.
+    Restricted to Admin (role_id=1) and Manager/TL (role_id=2).
+
+    Response: {"submitted": int, "failed": int}
+    """
+    ALLOWED_ROLES = {1, 2}
+    authentication_classes = [get_auth_backend()]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        newrelic.agent.add_custom_attributes([("endpoint", "submit_recordings")])
+        role = self.get_user_role(request)
+        if role not in self.ALLOWED_ROLES:
+            return Response(
+                {"error": "Only Admin or Manager/TL can trigger submission."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            counts = submit_pending_recordings()
+            return Response({"submitted": counts["submitted"], "failed": counts["failed"]})
+        except Exception as exc:
+            logger.exception("submit_recordings endpoint error")
+            return Response({"error": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class PollStuckRecordingsView(AuditPermissionMixin, APIView):
+    """
+    POST /audit/recordings/poll/
+    Poll the provider for recordings stuck in status=submitted.
+    Restricted to Admin (role_id=1) and Manager/TL (role_id=2).
+
+    Optional body: {"batch_size": int, "dry_run": bool}
+    Response: summary dict from run_poll_stuck_recordings()
+    """
+    ALLOWED_ROLES = {1, 2}
+    authentication_classes = [get_auth_backend()]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        newrelic.agent.add_custom_attributes([("endpoint", "poll_stuck_recordings")])
+        role = self.get_user_role(request)
+        if role not in self.ALLOWED_ROLES:
+            return Response(
+                {"error": "Only Admin or Manager/TL can trigger polling."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        data = request.data or {}
+        batch_size = data.get("batch_size", 50)
+        dry_run = data.get("dry_run", False)
+        try:
+            result = run_poll_stuck_recordings(batch_size=batch_size, dry_run=dry_run)
+            return Response(result)
+        except Exception as exc:
+            logger.exception("poll_stuck_recordings endpoint error")
+            return Response({"error": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# System status helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_recording_activity() -> dict:
+    """Return recording activity metrics. Returns null values on DB error.
+
+    Uses status=completed + completed_at (the field set when a recording
+    finishes webhook processing / LLM scoring).
+    """
+    from django.db.models.functions import TruncHour  # noqa: PLC0415
+
+    now = timezone.now()
+    today = now.date()
+    week_start = today - date.resolution * today.weekday()  # Monday
+    try:
+        completed = CallRecording.objects.filter(status="completed")
+        recordings_today = completed.filter(completed_at__date=today).count()
+        recordings_this_week = completed.filter(completed_at__date__gte=week_start).count()
+        recordings_this_month = completed.filter(
+            completed_at__year=today.year, completed_at__month=today.month
+        ).count()
+        last_ts = (
+            completed.order_by("-completed_at")
+            .values_list("completed_at", flat=True)
+            .first()
+        )
+        last_scored = last_ts.isoformat() if last_ts else None
+        pending_count = CallRecording.objects.filter(status="pending").count()
+        submitted_count = CallRecording.objects.filter(status="submitted").count()
+        hourly_qs = (
+            completed.filter(completed_at__date=today)
+            .annotate(hour=TruncHour("completed_at"))
+            .values("hour")
+            .annotate(cnt=Count("id"))
+        )
+        hourly: dict[str, int] = {f"{h:02d}": 0 for h in range(24)}
+        for row in hourly_qs:
+            if row["hour"] is not None:
+                h_key = f"{row['hour'].hour:02d}"
+                hourly[h_key] = row["cnt"]
+    except Exception:  # noqa: BLE001
+        logger.warning("SystemStatusView: recording_activity DB query failed", exc_info=True)
+        recordings_today = None
+        recordings_this_week = None
+        recordings_this_month = None
+        last_scored = None
+        pending_count = None
+        submitted_count = None
+        hourly = None
+    return {
+        "recordings_today": recordings_today,
+        "recordings_this_week": recordings_this_week,
+        "recordings_this_month": recordings_this_month,
+        "last_scored": last_scored,
+        "pending": pending_count,
+        "submitted": submitted_count,
+        "hourly_today": hourly,
+    }
+
+
+_AUDIT_ENV_VAR_KEYS = [
+    "AUDIT_AUTH_BACKEND",
+    "AUDIT_URL_SECRET",
+    "AUDIT_STATUS_SECRET",
+    "SPEECH_PROVIDER_API_KEY",
+    "SPEECH_PROVIDER_API_SECRET",
+    "SPEECH_PROVIDER_TEMPLATE_ID",
+    "SPEECH_PROVIDER_CALLBACK_URL",
+    "NEW_RELIC_INSERT_KEY",
+    "NEW_RELIC_LICENSE_KEY",
+    "NEW_RELIC_ACCOUNT_ID",
+    "GIT_COMMIT_HASH",
+    "GIT_BRANCH",
+    "DATABASE_URL",
+    "SECRET_KEY",
+]
+
+
+def _fire_nr_audit_status_event(data: dict) -> None:
+    """POST a BaySysAuditSystemStatus event to New Relic Insights API. Silent no-op on failure."""
+    import requests as _requests  # noqa: PLC0415
+
+    nr_key = os.environ.get("NEW_RELIC_INSERT_KEY") or os.environ.get("NEW_RELIC_LICENSE_KEY", "")
+    nr_account = os.environ.get("NEW_RELIC_ACCOUNT_ID", "")
+    if not nr_key or not nr_account:
+        return
+    ra = data["recording_activity"]
+    event = {
+        "eventType": "BaySysAuditSystemStatus",
+        "git_commit": data["backend"]["git_commit"],
+        "git_branch": data["backend"]["git_branch"],
+        "frontend_build_hash": data["frontend"]["build_hash"],
+        "latest_migration": data["migrations"]["latest_applied"],
+        "pending_migrations": len(data["migrations"]["pending"]),
+        "recordings_today": ra["recordings_today"],
+        "recordings_this_week": ra["recordings_this_week"],
+        "last_scored": ra["last_scored"],
+        "pending": ra["pending"],
+        "submitted": ra["submitted"],
+    }
+    url = f"https://insights-collector.newrelic.com/v1/accounts/{nr_account}/events"
+    headers = {"Content-Type": "application/json", "X-Insert-Key": nr_key}
+    try:
+        _requests.post(url, json=[event], headers=headers, timeout=5)
+    except Exception:  # noqa: BLE001
+        logger.debug("NR audit status event failed", exc_info=True)
+
+
+class SystemStatusView(View):
+    """
+    GET /audit/<URL_SECRET>/admin/status/?token=<AUDIT_STATUS_SECRET>
+
+    Read-only system health snapshot. Token auth via query param so the
+    endpoint is navigable directly in a browser or monitoring tool.
+    Returns 403 if token is missing or wrong.
+    """
+
+    def get(self, request, *args, **kwargs):
+        # ── Auth ──────────────────────────────────────────────────────────────
+        expected = getattr(django_settings, "AUDIT_STATUS_SECRET", "")
+        provided = request.GET.get("token", "")
+        if not expected or not hmac.compare_digest(expected, provided):
+            return JsonResponse({"error": "Forbidden"}, status=403)
+
+        # ── Migrations ────────────────────────────────────────────────────────
+        from django.db import connection  # noqa: PLC0415
+        from django.db.migrations.executor import MigrationExecutor  # noqa: PLC0415
+
+        executor = MigrationExecutor(connection)
+        applied = executor.loader.applied_migrations
+        audit_applied = sorted(name for app, name in applied if app == "baysys_call_audit")
+        latest_applied = audit_applied[-1] if audit_applied else "unknown"
+        total_applied = len(audit_applied)
+        pending_plan = executor.migration_plan(executor.loader.graph.leaf_nodes())
+        pending = [migration.name for migration, _ in pending_plan]
+
+        # ── Backend ───────────────────────────────────────────────────────────
+        git_commit = os.environ.get("GIT_COMMIT_HASH", "unknown")
+        git_branch = os.environ.get("GIT_BRANCH", "unknown")
+
+        # ── Frontend ──────────────────────────────────────────────────────────
+        static_root = getattr(django_settings, "STATIC_ROOT", None)
+        base_dir = getattr(django_settings, "BASE_DIR", "")
+        version_path = os.path.join(static_root or base_dir, "version.json")
+        try:
+            with open(version_path) as fh:
+                ver = json.load(fh)
+            build_hash = ver.get("build_hash", "unknown")
+            build_time = ver.get("build_time", "unknown")
+        except Exception:  # noqa: BLE001
+            build_hash = "unknown"
+            build_time = "unknown"
+
+        data = {
+            "generated_at": timezone.now().isoformat(),
+            "migrations": {
+                "latest_applied": latest_applied,
+                "total_applied": total_applied,
+                "pending": pending,
+            },
+            "backend": {
+                "git_commit": git_commit,
+                "git_branch": git_branch,
+            },
+            "frontend": {
+                "build_hash": build_hash,
+                "build_time": build_time,
+            },
+            "recording_activity": _build_recording_activity(),
+            "env_vars": {k: bool(os.environ.get(k, "")) for k in _AUDIT_ENV_VAR_KEYS},
+        }
+
+        _fire_nr_audit_status_event(data)
+
+        return JsonResponse(data)

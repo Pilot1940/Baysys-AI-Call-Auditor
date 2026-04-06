@@ -9,8 +9,11 @@
 ## Prerequisites
 
 - Prompt I complete (291 tests, `/submit/` and `/poll/` endpoints live)
+- Prompt K complete (`AUDIT_URL_SECRET` in place, all endpoints behind URL secret)
 - Prompt J complete (app merged into crm_apis, deployed to production)
 - GreyLabs credentials in `.envs/.production/.django`
+
+**Note on `<SECRET>`:** Replace `<SECRET>` throughout with your `AUDIT_URL_SECRET` env var value (a UUID). Without it every endpoint returns 404.
 
 ---
 
@@ -22,14 +25,14 @@ Set these in `.envs/.production/.django` (or your production secret store):
 SPEECH_PROVIDER_API_KEY=<GreyLabs API key from Kanishk>
 SPEECH_PROVIDER_API_SECRET=<GreyLabs API secret from Kanishk>
 SPEECH_PROVIDER_TEMPLATE_ID=1588
-SPEECH_PROVIDER_CALLBACK_URL=https://<your-production-domain>/audit/webhook/provider/
+SPEECH_PROVIDER_CALLBACK_URL=https://<your-production-domain>/audit/<SECRET>/webhook/provider/
 ```
 
 Restart the server after setting env vars.
 
 **Verify connection:**
 ```bash
-curl -X GET https://<your-domain>/audit/recordings/ \
+curl -X GET https://<your-domain>/audit/<SECRET>/recordings/ \
   -H "Authorization: Token <admin-token>"
 ```
 Should return 200 with a (possibly empty) recordings list.
@@ -42,7 +45,7 @@ Should return 200 with a (possibly empty) recordings list.
 
 Trigger via HTTP:
 ```bash
-curl -X POST https://<your-domain>/audit/recordings/sync/ \
+curl -X POST https://<your-domain>/audit/<SECRET>/recordings/sync/ \
   -H "Authorization: Token <admin-token>" \
   -H "Content-Type: application/json" \
   -d '{"date": "2026-04-07"}'
@@ -62,7 +65,7 @@ call_id, agent_id, customer_id, call_date, call_duration_seconds, recording_url,
 
 Upload via HTTP:
 ```bash
-curl -X POST https://<your-domain>/audit/recordings/import/ \
+curl -X POST https://<your-domain>/audit/<SECRET>/recordings/import/ \
   -H "Authorization: Token <admin-token>" \
   -F "file=@uat_calls.csv"
 ```
@@ -72,7 +75,7 @@ curl -X POST https://<your-domain>/audit/recordings/import/ \
 ## Phase 3 — Verify calls are pending
 
 ```bash
-curl -X GET "https://<your-domain>/audit/recordings/?status=pending" \
+curl -X GET "https://<your-domain>/audit/<SECRET>/recordings/?status=pending" \
   -H "Authorization: Token <admin-token>"
 ```
 
@@ -83,7 +86,7 @@ Should show 10–20 recordings with `"status": "pending"`.
 ## Phase 4 — Submit to GreyLabs
 
 ```bash
-curl -X POST https://<your-domain>/audit/recordings/submit/ \
+curl -X POST https://<your-domain>/audit/<SECRET>/recordings/submit/ \
   -H "Authorization: Token <admin-token>"
 ```
 
@@ -94,7 +97,7 @@ Returns: `{"submitted": N, "failed": 0}`
 
 Check status:
 ```bash
-curl -X GET "https://<your-domain>/audit/recordings/?status=submitted" \
+curl -X GET "https://<your-domain>/audit/<SECRET>/recordings/?status=submitted" \
   -H "Authorization: Token <admin-token>"
 ```
 
@@ -102,7 +105,7 @@ curl -X GET "https://<your-domain>/audit/recordings/?status=submitted" \
 
 ## Phase 5 — Wait for webhooks
 
-GreyLabs will POST results to `https://<your-domain>/audit/webhook/provider/` as they complete.
+GreyLabs will POST results to `https://<your-domain>/audit/<SECRET>/webhook/provider/` as they complete.
 
 Each webhook call will:
 1. Update the recording status to `scored`
@@ -111,7 +114,7 @@ Each webhook call will:
 
 Monitor progress:
 ```bash
-curl -X GET "https://<your-domain>/audit/recordings/?status=scored" \
+curl -X GET "https://<your-domain>/audit/<SECRET>/recordings/?status=scored" \
   -H "Authorization: Token <admin-token>"
 ```
 
@@ -125,13 +128,13 @@ If recordings remain in `submitted` status after 30+ minutes:
 
 ```bash
 # Dry run first — see what would be polled
-curl -X POST https://<your-domain>/audit/recordings/poll/ \
+curl -X POST https://<your-domain>/audit/<SECRET>/recordings/poll/ \
   -H "Authorization: Token <admin-token>" \
   -H "Content-Type: application/json" \
   -d '{"dry_run": true}'
 
 # Actually poll
-curl -X POST https://<your-domain>/audit/recordings/poll/ \
+curl -X POST https://<your-domain>/audit/<SECRET>/recordings/poll/ \
   -H "Authorization: Token <admin-token>"
 ```
 
@@ -143,7 +146,7 @@ Returns: `{"polled": N, "recovered": N, "still_processing": N, "errors": N, "dry
 
 Check a single recording in detail:
 ```bash
-curl -X GET https://<your-domain>/audit/recordings/<recording_id>/ \
+curl -X GET https://<your-domain>/audit/<SECRET>/recordings/<recording_id>/ \
   -H "Authorization: Token <admin-token>"
 ```
 
@@ -157,7 +160,7 @@ Look for:
 ## Phase 8 — Check compliance flags
 
 ```bash
-curl -X GET "https://<your-domain>/audit/compliance-flags/?recording_id=<id>" \
+curl -X GET "https://<your-domain>/audit/<SECRET>/compliance-flags/?recording_id=<id>" \
   -H "Authorization: Token <admin-token>"
 ```
 
@@ -169,7 +172,7 @@ Each flag has:
 
 Check the dashboard summary for aggregate stats:
 ```bash
-curl -X GET https://<your-domain>/audit/dashboard/summary/ \
+curl -X GET https://<your-domain>/audit/<SECRET>/dashboard/summary/ \
   -H "Authorization: Token <admin-token>"
 ```
 
@@ -179,15 +182,15 @@ curl -X GET https://<your-domain>/audit/dashboard/summary/ \
 
 | Endpoint | Method | Auth | Purpose |
 |---|---|---|---|
-| `/audit/recordings/` | GET | Admin/Manager | List recordings (filter by `?status=`) |
-| `/audit/recordings/<id>/` | GET | Admin/Manager | Single recording detail |
-| `/audit/recordings/import/` | POST | Admin/Manager | CSV/Excel import |
-| `/audit/recordings/sync/` | POST | Admin/Supervisor | Sync from call_logs for a date |
-| `/audit/recordings/submit/` | POST | Admin/Manager | Submit pending to GreyLabs |
-| `/audit/recordings/poll/` | POST | Admin/Manager | Poll stuck recordings |
-| `/audit/webhook/provider/` | POST | None (provider) | Receive GreyLabs callbacks |
-| `/audit/compliance-flags/` | GET | Admin/Manager | List compliance flags |
-| `/audit/dashboard/summary/` | GET | Admin/Manager | Aggregate stats |
+| `/audit/<SECRET>/recordings/` | GET | Admin/Manager | List recordings (filter by `?status=`) |
+| `/audit/<SECRET>/recordings/<id>/` | GET | Admin/Manager | Single recording detail |
+| `/audit/<SECRET>/recordings/import/` | POST | Admin/Manager | CSV/Excel import |
+| `/audit/<SECRET>/recordings/sync/` | POST | Admin/Supervisor | Sync from call_logs for a date |
+| `/audit/<SECRET>/recordings/submit/` | POST | Admin/Manager | Submit pending to GreyLabs |
+| `/audit/<SECRET>/recordings/poll/` | POST | Admin/Manager | Poll stuck recordings |
+| `/audit/<SECRET>/webhook/provider/` | POST | None (provider) | Receive GreyLabs callbacks |
+| `/audit/<SECRET>/compliance-flags/` | GET | Admin/Manager | List compliance flags |
+| `/audit/<SECRET>/dashboard/summary/` | GET | Admin/Manager | Aggregate stats |
 
 ---
 
@@ -199,7 +202,7 @@ curl -X GET https://<your-domain>/audit/dashboard/summary/ \
 - Check server logs for `speech_provider` errors
 
 **Webhooks not arriving**
-- Confirm `SPEECH_PROVIDER_CALLBACK_URL` points to the correct production domain with `/audit/webhook/provider/`
+- Confirm `SPEECH_PROVIDER_CALLBACK_URL` points to the correct production domain with `/audit/<SECRET>/webhook/provider/`
 - Confirm the URL is publicly reachable (not localhost)
 - Use the poll endpoint as fallback
 

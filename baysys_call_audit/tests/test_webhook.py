@@ -3,6 +3,7 @@ from datetime import datetime, timezone as tz
 from unittest.mock import patch
 
 from django.test import TestCase, override_settings
+from django.urls import reverse
 from rest_framework.test import APIClient
 
 from baysys_call_audit.models import (
@@ -54,7 +55,7 @@ SAMPLE_WEBHOOK_PAYLOAD = {
 class ProviderWebhookViewTests(TestCase):
     def setUp(self):
         self.client = APIClient()
-        self.url = "/audit/webhook/provider/"
+        self.url = reverse("baysys_call_audit:provider-webhook")
 
     @patch("baysys_call_audit.compliance.load_compliance_rules", return_value={"provider_rules": []})
     @patch("baysys_call_audit.compliance.load_fatal_level_rules", return_value={})
@@ -140,7 +141,7 @@ class ProviderWebhookViewTests(TestCase):
 class ProviderWebhookIPAllowlistTests(TestCase):
     def setUp(self):
         self.client = APIClient()
-        self.url = "/audit/webhook/provider/"
+        self.url = reverse("baysys_call_audit:provider-webhook")
 
     @override_settings(SPEECH_PROVIDER_WEBHOOK_ALLOWED_IPS="203.0.113.10,203.0.113.11")
     def test_allowed_ip_via_remote_addr(self):

@@ -107,7 +107,7 @@ Create `baysys_call_audit/tests/test_submit_api.py` with ~8 tests covering:
 
 ## Acceptance criteria
 
-- `python -m pytest baysys_call_audit/tests/ -q` → `Ran 291 tests in ...`, 0 failures
+- `python -m pytest baysys_call_audit/tests/ -q` → `Ran 294 tests in ...`, 0 failures
 - `ruff check .` → 0 findings
 - `curl -X POST http://localhost:8000/audit/recordings/submit/ -H "Authorization: Token <admin-token>"` returns JSON
 - `curl -X POST http://localhost:8000/audit/recordings/poll/ -H "Authorization: Token <admin-token>" -d '{"dry_run": true}'` returns summary JSON

@@ -48,7 +48,7 @@ class PollStuckRecordingsQueryTests(TestCase):
         self.assertIn("Polled:           0", output)
 
     @override_settings(POLL_STUCK_AFTER_MINUTES=30)
-    @patch("baysys_call_audit.management.commands.poll_stuck_recordings.speech_provider")
+    @patch("baysys_call_audit.services.speech_provider")
     def test_recent_submission_not_polled(self, mock_provider):
         # Submitted only 5 minutes ago — within the 30-minute threshold
         _make_submitted_recording(submitted_minutes_ago=5)
@@ -56,7 +56,7 @@ class PollStuckRecordingsQueryTests(TestCase):
         mock_provider.get_results.assert_not_called()
 
     @override_settings(POLL_STUCK_AFTER_MINUTES=30)
-    @patch("baysys_call_audit.management.commands.poll_stuck_recordings.speech_provider")
+    @patch("baysys_call_audit.services.speech_provider")
     def test_old_submission_is_polled(self, mock_provider):
         # Submitted 60 minutes ago — past the threshold
         _make_submitted_recording(submitted_minutes_ago=60)
@@ -78,7 +78,7 @@ class PollStuckRecordingsQueryTests(TestCase):
             submitted_at=timezone.now() - timezone.timedelta(minutes=60),
         )
         with patch(
-            "baysys_call_audit.management.commands.poll_stuck_recordings.speech_provider"
+            "baysys_call_audit.services.speech_provider"
         ) as mock_provider:
             mock_provider.ProviderError = Exception
             _run_command()
@@ -96,8 +96,8 @@ class PollStuckRecordingsRecoveryTests(TestCase):
     }
 
     @override_settings(POLL_STUCK_AFTER_MINUTES=30)
-    @patch("baysys_call_audit.management.commands.poll_stuck_recordings.process_provider_webhook")
-    @patch("baysys_call_audit.management.commands.poll_stuck_recordings.speech_provider")
+    @patch("baysys_call_audit.services.process_provider_webhook")
+    @patch("baysys_call_audit.services.speech_provider")
     def test_successful_recovery(self, mock_provider, mock_webhook):
         recording = _make_submitted_recording()
         mock_provider.get_results.return_value = self.VALID_PAYLOAD
@@ -112,7 +112,7 @@ class PollStuckRecordingsRecoveryTests(TestCase):
         self.assertIn("Recovered:        1", output)
 
     @override_settings(POLL_STUCK_AFTER_MINUTES=30)
-    @patch("baysys_call_audit.management.commands.poll_stuck_recordings.speech_provider")
+    @patch("baysys_call_audit.services.speech_provider")
     def test_provider_error_increments_retry_count(self, mock_provider):
         recording = _make_submitted_recording()
         initial_retry = recording.retry_count
@@ -127,7 +127,7 @@ class PollStuckRecordingsRecoveryTests(TestCase):
         self.assertEqual(recording.status, "submitted")  # stays submitted
 
     @override_settings(POLL_STUCK_AFTER_MINUTES=30)
-    @patch("baysys_call_audit.management.commands.poll_stuck_recordings.speech_provider")
+    @patch("baysys_call_audit.services.speech_provider")
     def test_still_processing_not_counted_as_error(self, mock_provider):
         _make_submitted_recording()
         mock_provider.ProviderError = Exception
@@ -138,7 +138,7 @@ class PollStuckRecordingsRecoveryTests(TestCase):
         self.assertIn("Errors:           0", output)
 
     @override_settings(POLL_STUCK_AFTER_MINUTES=30)
-    @patch("baysys_call_audit.management.commands.poll_stuck_recordings.speech_provider")
+    @patch("baysys_call_audit.services.speech_provider")
     def test_dry_run_no_api_calls(self, mock_provider):
         _make_submitted_recording(submitted_minutes_ago=60)
         mock_provider.ProviderError = Exception
@@ -150,7 +150,7 @@ class PollStuckRecordingsRecoveryTests(TestCase):
         self.assertIn("1 recording(s)", output)
 
     @override_settings(POLL_STUCK_AFTER_MINUTES=30)
-    @patch("baysys_call_audit.management.commands.poll_stuck_recordings.speech_provider")
+    @patch("baysys_call_audit.services.speech_provider")
     def test_batch_size_limits_polling(self, mock_provider):
         # Create 5 stuck recordings
         for i in range(5):

@@ -1,8 +1,8 @@
 # BaySys Call Audit AI — Code Repository Manifest
 
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
-**Last updated:** Session 10 (Prompt H — New Relic APM instrumentation — complete)
-**Test count:** 283 passing
+**Last updated:** Session 13 (Prompt L — System status endpoint — complete)
+**Test count:** 302 passing
 **Ruff findings:** 0
 **Open issues:** TBD (issues created after push)
 
@@ -17,7 +17,7 @@
 | `settings_test.py` | Test override — SQLite in-memory |
 | `urls.py` | Root URL config: `admin/` + `audit/` (includes app urls) |
 | `requirements.txt` | Python deps: Django, DRF, django-cors-headers, psycopg2-binary, dj-database-url, requests, python-decouple, openpyxl, pyyaml, newrelic, ruff |
-| `.env.example` | Template for environment variables |
+| `.env.example` | Template for environment variables — includes `AUDIT_URL_SECRET` (secret URL prefix for all audit endpoints) |
 | `.gitignore` | Standard Python/Node/Django ignores |
 | `newrelic.ini.example` | New Relic APM config template (no secrets; committed to git) |
 | `CLAUDE.md` | Build rules for Claude Code sessions |
@@ -129,10 +129,10 @@
 | `speech_provider.py` | Provider adapter | `submit_recording()`, `get_results()`, `delete_resource()`, `ask_question()`, `submit_transcript()`, `update_metadata()`, `ProviderError` |
 | `compliance.py` | Config-driven compliance engine | `check_metadata_compliance(recording, call_counts_cache=None)` — cache dict enables O(1) max_calls check (sync path); None falls back to DB query (webhook path). `check_provider_compliance()`, `compute_fatal_level()`, `load_compliance_rules()`, `load_fatal_level_rules()`, `load_gazette_holidays()`. All time/date checks use IST via `_IST = ZoneInfo("Asia/Kolkata")`. |
 | `ingestion.py` | Shared ingestion logic | `create_recording_from_row(row, existing_urls=None, call_counts_cache=None)` — `existing_urls` set: O(1) dedup; `call_counts_cache` dict: O(1) max_calls check. Both default to None (CSV/webhook paths use DB fallback). `run_sync_for_date()` — pre-fetches existing URLs (one query) and call counts dict (one annotated query) before loop; uses `fetchall()` to drain cursor before ORM writes (pgbouncer transaction-mode safe). `validate_row()`, `parse_datetime_flexible()`, `normalize_column_name()`, `_determine_submission_tier()`, `_load_submission_priority()`. SYNC_QUERY filters on `call_start_time`; duration from `SYNC_MIN_CALL_DURATION` (default 20s). |
-| `services.py` | Business logic | `submit_pending_recordings()`, `process_provider_webhook()`, `run_own_llm_scoring()` (placeholder), `_normalise_provider_payload(raw, resource_id)` (private — ensures resource_insight_id present in poll responses) |
+| `services.py` | Business logic | `submit_pending_recordings()`, `process_provider_webhook()`, `run_poll_stuck_recordings()`, `run_own_llm_scoring()` (placeholder), `_normalise_provider_payload(raw, resource_id)` (private — ensures resource_insight_id present in poll responses) |
 | `serializers.py` | DRF serializers | `CallRecordingListSerializer`, `CallTranscriptSerializer`, `ProviderScoreSerializer`, `ComplianceFlagSerializer`, `OwnLLMScoreSerializer`, `CallDetailSerializer`, `DashboardSummarySerializer` |
-| `views.py` | API views | `ProviderWebhookView`, `RecordingListView`, `RecordingDetailView`, `DashboardSummaryView`, `ComplianceFlagListView`, `RecordingImportView`, `SyncCallLogsView` |
-| `urls.py` | URL patterns | 7 routes under `/audit/` |
+| `views.py` | API views | `ProviderWebhookView`, `RecordingListView`, `RecordingDetailView`, `DashboardSummaryView`, `ComplianceFlagListView`, `RecordingImportView`, `SyncCallLogsView`, `SubmitRecordingsView`, `PollStuckRecordingsView`, `SystemStatusView` — helpers: `_build_recording_activity`, `_fire_nr_audit_status_event`, `_AUDIT_ENV_VAR_KEYS` |
+| `urls.py` | URL patterns | 10 routes under `/audit/<URL_SECRET>/` |
 
 ### Management commands (`management/commands/`)
 
@@ -163,7 +163,9 @@
 | `test_submission_tiers.py` | 35 | Tier matching, tier assignment at creation, submit tier filter, S3 re-signing, submit_recordings command |
 | `test_poll_stuck_recordings.py` | 9 | poll_stuck_recordings command: query selection, threshold, recovery, errors, dry-run, batch-size |
 | `test_newrelic_instrumentation.py` | 8 | `@background_task` decorators verified; NR API callable as no-op without agent |
-| **Total** | **283** | — |
+| `test_submit_api.py` | 11 | SubmitRecordingsView + PollStuckRecordingsView: RBAC, 403 for unauthenticated, 500 on exception, dry_run passthrough, batch_size passthrough |
+| `test_system_status.py` | 8 | SystemStatusView: token auth (correct/missing/wrong/unset), top-level keys, recording_activity DB query, env_vars dict of booleans, migrations block |
+| **Total** | **302** | — |
 
 ---
 

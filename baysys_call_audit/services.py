@@ -2,9 +2,10 @@
 Ingestion pipeline, scoring logic, and compliance integration.
 
 Key services:
-  - submit_pending_recordings()   -> batch-submit recordings to provider
-  - process_provider_webhook()    -> handle provider callback, create transcript + scores + flags
-  - run_own_llm_scoring()         -> placeholder for custom LLM scoring (future)
+  - submit_pending_recordings()      -> batch-submit recordings to provider
+  - process_provider_webhook()       -> handle provider callback, create transcript + scores + flags
+  - run_poll_stuck_recordings()      -> poll provider for recordings stuck in status=submitted
+  - run_own_llm_scoring()            -> placeholder for custom LLM scoring (future)
 
 Compliance logic lives in compliance.py (config-driven engine).
 """
@@ -246,6 +247,83 @@ def _find_subjective(subjective_data: list, parameter_name: str) -> str | None:
         if item.get("audit_parameter_name") == parameter_name:
             return item.get("answer")
     return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Polling: recover recordings stuck in status=submitted
+# ─────────────────────────────────────────────────────────────────────────────
+
+@newrelic.agent.background_task(name='run_poll_stuck_recordings')
+def run_poll_stuck_recordings(
+    batch_size: int = 50,
+    dry_run: bool = False,
+) -> dict:
+    """
+    Poll the provider for recordings stuck in status=submitted.
+
+    Returns a summary dict:
+        {
+            "polled": int,
+            "recovered": int,
+            "still_processing": int,
+            "errors": int,
+            "dry_run": bool,
+            "threshold_minutes": int,
+        }
+    """
+    threshold_minutes = getattr(settings, "POLL_STUCK_AFTER_MINUTES", 30)
+    cutoff = timezone.now() - timezone.timedelta(minutes=threshold_minutes)
+    stuck_qs = (
+        CallRecording.objects.filter(
+            status="submitted",
+            submitted_at__lt=cutoff,
+            provider_resource_id__isnull=False,
+        )
+        .exclude(provider_resource_id="")
+        .order_by("submitted_at")[:batch_size]
+    )
+
+    result = {
+        "polled": 0,
+        "recovered": 0,
+        "still_processing": 0,
+        "errors": 0,
+        "dry_run": dry_run,
+        "threshold_minutes": threshold_minutes,
+    }
+
+    if dry_run:
+        result["polled"] = stuck_qs.count()
+        return result
+
+    for recording in stuck_qs:
+        result["polled"] += 1
+        try:
+            poll_result = speech_provider.get_results(recording.provider_resource_id)
+
+            # "Still processing" — absent transcript means results not ready yet
+            if not poll_result.get("transcript"):
+                result["still_processing"] += 1
+                continue
+
+            payload = _normalise_provider_payload(poll_result, recording.provider_resource_id)
+            updated = process_provider_webhook(payload)
+            if updated and updated.status == "completed":
+                result["recovered"] += 1
+            else:
+                result["still_processing"] += 1
+
+        except speech_provider.ProviderError as exc:
+            result["errors"] += 1
+            recording.retry_count += 1
+            recording.save(update_fields=["retry_count"])
+            logger.warning(
+                "Poll error for recording %s (resource_id=%s): %s",
+                recording.pk, recording.provider_resource_id, exc,
+            )
+
+    logger.info("run_poll_stuck_recordings: %s", result)
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────

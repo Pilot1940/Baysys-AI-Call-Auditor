@@ -105,13 +105,14 @@ In `.envs/.production/.django` (and `.envs/.local/.django`), add after the `TRAI
 ```ini
 # Call Auditor
 AUDIT_AUTH_BACKEND=crm
+AUDIT_URL_SECRET=<generate a UUID — keep secret, this is part of every endpoint URL>
 SPEECH_PROVIDER_API_KEY=<from GreyLabs>
 SPEECH_PROVIDER_API_SECRET=<from GreyLabs>
 SPEECH_PROVIDER_TEMPLATE_ID=1588
-SPEECH_PROVIDER_CALLBACK_URL=https://<production-domain>/audit/webhook/provider/
+SPEECH_PROVIDER_CALLBACK_URL=https://<production-domain>/audit/<AUDIT_URL_SECRET>/webhook/provider/
 ```
 
-For local `.envs/.local/.django`, set `AUDIT_AUTH_BACKEND=mock`.
+For local `.envs/.local/.django`, set `AUDIT_AUTH_BACKEND=mock` and any `AUDIT_URL_SECRET` value.
 
 ---
 
@@ -120,7 +121,13 @@ For local `.envs/.local/.django`, set `AUDIT_AUTH_BACKEND=mock`.
 In `config/urls.py`, add alongside the Trainer route:
 
 ```python
-path("audit/", include("arc.baysys_call_audit.urls")),
+from django.conf import settings
+path(f"audit/{settings.AUDIT_URL_SECRET}/", include("arc.baysys_call_audit.urls")),
+```
+
+Also add to `config/settings/base.py`:
+```python
+AUDIT_URL_SECRET = env("AUDIT_URL_SECRET", default="dev-secret")
 ```
 
 ---
@@ -171,10 +178,10 @@ Do NOT push to `main`. Open a PR from `call-auditor` → `main` for review.
 | `arc/baysys_call_audit/apps.py` | `name` → `"arc.baysys_call_audit"` |
 | `arc/baysys_call_audit/ingestion.py` | Fix `_SUBMISSION_PRIORITY_PATH` to use `settings.BASE_DIR` |
 | `config/*.yaml` | Copy 4 YAML files from standalone repo |
-| `config/settings/base.py` | Add `"arc.baysys_call_audit"` to `INSTALLED_APPS` |
-| `config/urls.py` | Add `path("audit/", include(...))` |
-| `.envs/.production/.django` | Add 5 Call Auditor env vars |
-| `.envs/.local/.django` | Add `AUDIT_AUTH_BACKEND=mock` + placeholder vars |
+| `config/settings/base.py` | Add `"arc.baysys_call_audit"` to `INSTALLED_APPS` + `AUDIT_URL_SECRET` setting |
+| `config/urls.py` | Add `path(f"audit/{settings.AUDIT_URL_SECRET}/", include(...))` |
+| `.envs/.production/.django` | Add 6 Call Auditor env vars (includes `AUDIT_URL_SECRET`) |
+| `.envs/.local/.django` | Add `AUDIT_AUTH_BACKEND=mock` + `AUDIT_URL_SECRET` + placeholder vars |
 
 Do NOT modify `arc/baysys_trainer/` or any Trainer files.
 Do NOT commit to `main` or `master`.

@@ -119,3 +119,10 @@ POLL_STUCK_AFTER_MINUTES = config("POLL_STUCK_AFTER_MINUTES", default=30, cast=i
 
 # Webhook IP allowlist — comma-separated; empty string means allow all
 SPEECH_PROVIDER_WEBHOOK_ALLOWED_IPS = config("SPEECH_PROVIDER_WEBHOOK_ALLOWED_IPS", default="")
+
+# URL secret — all audit endpoints are prefixed with this segment
+# Use a long random string (e.g. uuid4) in production. Keep secret.
+AUDIT_URL_SECRET = config("AUDIT_URL_SECRET", default="dev-secret")
+
+# Health check token — required query param for GET /audit/<URL_SECRET>/admin/status/
+AUDIT_STATUS_SECRET = config("AUDIT_STATUS_SECRET", default="dev-status-secret")
