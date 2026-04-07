@@ -1,8 +1,8 @@
 # BaySys Call Audit AI — Code Repository Manifest
 
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
-**Last updated:** Session 13 (Prompt L — System status endpoint — complete)
-**Test count:** 302 passing
+**Last updated:** Session 14 (Prompt M — Phase 1 UI backend endpoints — complete)
+**Test count:** 317 passing
 **Ruff findings:** 0
 **Open issues:** TBD (issues created after push)
 
@@ -131,8 +131,8 @@
 | `ingestion.py` | Shared ingestion logic | `create_recording_from_row(row, existing_urls=None, call_counts_cache=None)` — `existing_urls` set: O(1) dedup; `call_counts_cache` dict: O(1) max_calls check. Both default to None (CSV/webhook paths use DB fallback). `run_sync_for_date()` — pre-fetches existing URLs (one query) and call counts dict (one annotated query) before loop; uses `fetchall()` to drain cursor before ORM writes (pgbouncer transaction-mode safe). `validate_row()`, `parse_datetime_flexible()`, `normalize_column_name()`, `_determine_submission_tier()`, `_load_submission_priority()`. SYNC_QUERY filters on `call_start_time`; duration from `SYNC_MIN_CALL_DURATION` (default 20s). |
 | `services.py` | Business logic | `submit_pending_recordings()`, `process_provider_webhook()`, `run_poll_stuck_recordings()`, `run_own_llm_scoring()` (placeholder), `_normalise_provider_payload(raw, resource_id)` (private — ensures resource_insight_id present in poll responses) |
 | `serializers.py` | DRF serializers | `CallRecordingListSerializer`, `CallTranscriptSerializer`, `ProviderScoreSerializer`, `ComplianceFlagSerializer`, `OwnLLMScoreSerializer`, `CallDetailSerializer`, `DashboardSummarySerializer` |
-| `views.py` | API views | `ProviderWebhookView`, `RecordingListView`, `RecordingDetailView`, `DashboardSummaryView`, `ComplianceFlagListView`, `RecordingImportView`, `SyncCallLogsView`, `SubmitRecordingsView`, `PollStuckRecordingsView`, `SystemStatusView` — helpers: `_build_recording_activity`, `_fire_nr_audit_status_event`, `_AUDIT_ENV_VAR_KEYS` |
-| `urls.py` | URL patterns | 10 routes under `/audit/<URL_SECRET>/` |
+| `views.py` | API views | `ProviderWebhookView`, `RecordingListView`, `RecordingDetailView`, `DashboardSummaryView`, `ComplianceFlagListView`, `RecordingImportView`, `SyncCallLogsView`, `SubmitRecordingsView`, `PollStuckRecordingsView`, `RecordingSignedUrlView`, `FlagReviewView`, `RecordingRetryView`, `SystemStatusView` — helpers: `_build_recording_activity`, `_fire_nr_audit_status_event`, `_AUDIT_ENV_VAR_KEYS` |
+| `urls.py` | URL patterns | 13 routes under `/audit/<URL_SECRET>/` |
 
 ### Management commands (`management/commands/`)
 
@@ -152,7 +152,7 @@
 | `test_speech_provider.py` | 10 | All 6 provider functions: success + error paths |
 | `test_webhook.py` | 12 | Webhook receiver: success, idempotency, compliance flags, edge cases |
 | `test_services.py` | 11 | Submission pipeline, webhook processing, LLM scoring placeholder |
-| `test_views.py` | 13 | All API views: list, detail, dashboard, compliance flags, pagination, filters |
+| `test_views.py` | 28 | All API views: list, detail, dashboard, compliance flags, pagination, filters, signed-url, flag review, retry |
 | `test_crm_adapter.py` | 10 | All 7 adapter functions in mock mode |
 | `test_ingestion.py` | 47 | Shared ingestion: validate_row, parse_datetime, normalize_column, create_recording_from_row, existing_urls fast-path dedup, call_counts_cache, SYNC_QUERY param count |
 | `test_sync_call_logs.py` | 18 | sync_call_logs command: mapping, date args, dedup, dry-run, batch-size, pre-fetch dedup, intra-batch dedup, min_duration param |
@@ -165,7 +165,7 @@
 | `test_newrelic_instrumentation.py` | 8 | `@background_task` decorators verified; NR API callable as no-op without agent |
 | `test_submit_api.py` | 11 | SubmitRecordingsView + PollStuckRecordingsView: RBAC, 403 for unauthenticated, 500 on exception, dry_run passthrough, batch_size passthrough |
 | `test_system_status.py` | 8 | SystemStatusView: token auth (correct/missing/wrong/unset), top-level keys, recording_activity DB query, env_vars dict of booleans, migrations block |
-| **Total** | **302** | — |
+| **Total** | **317** | — |
 
 ---
 

@@ -48,16 +48,16 @@ name = "arc.baysys_call_audit"
 
 ---
 
-## Step 3 — Copy config YAMLs
+## Step 3 — Copy config files
 
 ```bash
-cp <path-to-Baysys-AI-Call-Auditor>/config/compliance_rules.yaml  config/
-cp <path-to-Baysys-AI-Call-Auditor>/config/fatal_level_rules.yaml  config/
-cp <path-to-Baysys-AI-Call-Auditor>/config/submission_priority.yaml  config/
-cp <path-to-Baysys-AI-Call-Auditor>/config/holidays_in.yaml  config/
+cp <path-to-Baysys-AI-Call-Auditor>/config/compliance_rules.yaml      config/
+cp <path-to-Baysys-AI-Call-Auditor>/config/fatal_level_rules.yaml      config/
+cp <path-to-Baysys-AI-Call-Auditor>/config/submission_priority.yaml    config/
+cp <path-to-Baysys-AI-Call-Auditor>/config/gazette_holidays_2026.txt   config/
 ```
 
-(Copy all YAML files from the standalone repo's `config/` directory.)
+**Important:** Copy ALL files from `config/` including the `.txt` holiday file — not just YAMLs. The compliance engine will fail to load holidays if this file is missing.
 
 ---
 
@@ -148,6 +148,37 @@ Verify all 4 migrations apply cleanly (0001–0004).
 
 ---
 
+## Step 9a — Fix @patch() paths in test files
+
+All `@patch()` decorators in the test suite reference the standalone app path. After copying to `arc/`, update every occurrence:
+
+```bash
+# In arc/baysys_call_audit/tests/*.py — replace all patch paths
+# baysys_call_audit.services → arc.baysys_call_audit.services
+# baysys_call_audit.views    → arc.baysys_call_audit.views
+# baysys_call_audit.ingestion → arc.baysys_call_audit.ingestion
+# (etc. — all baysys_call_audit.* → arc.baysys_call_audit.*)
+sed -i 's/@patch("baysys_call_audit\./@patch("arc.baysys_call_audit./g' arc/baysys_call_audit/tests/*.py
+```
+
+Verify no bare `baysys_call_audit.` remain in patch strings (excluding `arc.baysys_call_audit.`):
+```bash
+grep -n '"baysys_call_audit\.' arc/baysys_call_audit/tests/*.py | grep -v 'arc\.'
+```
+Should return nothing.
+
+## Step 9b — Add ruff per-file-ignores
+
+In `pyproject.toml` (or `ruff.toml`), add the same pattern used for the Trainer:
+```toml
+[tool.ruff.lint.per-file-ignores]
+"arc/baysys_call_audit/**" = ["PLC0415"]
+```
+
+## Step 9c — MIDDLEWARE override in test settings
+
+In the test settings file, ensure `MIDDLEWARE` is overridden to use the correct `arc.` paths — same pattern as `arc.baysys_trainer` test settings. Check the Trainer test settings for the exact override.
+
 ## Step 10 — Run the test suite
 
 ```bash
@@ -155,7 +186,7 @@ python -m pytest arc/baysys_call_audit/tests/ -q
 ruff check arc/baysys_call_audit/
 ```
 
-All 291 tests must pass, 0 ruff findings.
+All 302 tests must pass, 0 ruff findings. Note: tests run against a real DB (Supabase) so expect ~16 min runtime.
 
 ---
 

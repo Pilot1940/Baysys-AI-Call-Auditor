@@ -11,6 +11,9 @@ Views:
   - SyncCallLogsView — failsafe sync trigger (Admin/Supervisor)
   - SubmitRecordingsView — trigger batch submission to provider (Admin/Manager)
   - PollStuckRecordingsView — poll provider for stuck recordings (Admin/Manager)
+  - RecordingSignedUrlView — signed S3 URL for audio playback (all roles)
+  - FlagReviewView — mark/unmark compliance flag reviewed (Admin/Manager/Supervisor)
+  - RecordingRetryView — reset failed recording to pending (Admin/Manager)
   - SystemStatusView — read-only health snapshot, token-auth via ?token= query param
 """
 import hmac
@@ -21,7 +24,7 @@ from datetime import date
 
 import newrelic.agent
 from django.conf import settings as django_settings
-from django.db.models import Avg, Count
+from django.db.models import Avg, Count, Q
 from django.http import JsonResponse
 from django.utils import timezone
 from django.views import View
@@ -30,6 +33,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from . import crm_adapter
 from .auth import AuditPermissionMixin, get_auth_backend
 from .models import CallRecording, ComplianceFlag, ProviderScore
 from .serializers import (
@@ -180,14 +184,37 @@ class DashboardSummaryView(AuditPermissionMixin, APIView):
 
         flags_qs = ComplianceFlag.objects.filter(recording__in=qs)
 
+        last_sync_at = qs.order_by("-created_at").values_list("created_at", flat=True).first()
+        last_completed_at = (
+            qs.filter(status="completed")
+            .order_by("-completed_at")
+            .values_list("completed_at", flat=True)
+            .first()
+        )
+
+        agent_summary = list(
+            qs.filter(status="completed")
+            .values("agent_id", "agent_name")
+            .annotate(
+                calls=Count("pk"),
+                avg_score=Avg("provider_scores__score_percentage"),
+                fatals=Count("pk", filter=Q(fatal_level__gte=3)),
+            )
+            .order_by("-avg_score")[:20]
+        )
+
         data = {
             "total_recordings": total,
             "completed": completed,
             "pending": qs.filter(status="pending").count(),
             "failed": qs.filter(status="failed").count(),
+            "submitted": qs.filter(status="submitted").count(),
             "avg_compliance_score": round(avg_score, 2) if avg_score else None,
             "total_compliance_flags": flags_qs.count(),
             "critical_flags": flags_qs.filter(severity="critical").count(),
+            "last_sync_at": last_sync_at.isoformat() if last_sync_at else None,
+            "last_completed_at": last_completed_at.isoformat() if last_completed_at else None,
+            "agent_summary": agent_summary,
         }
 
         serializer = DashboardSummarySerializer(data)
@@ -487,6 +514,113 @@ class PollStuckRecordingsView(AuditPermissionMixin, APIView):
         except Exception as exc:
             logger.exception("poll_stuck_recordings endpoint error")
             return Response({"error": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class RecordingSignedUrlView(AuditPermissionMixin, APIView):
+    """
+    GET /audit/<S>/recordings/<recording_id>/signed-url/
+    Returns a short-lived signed S3 URL for audio playback.
+    All authenticated roles permitted.
+    """
+    authentication_classes = [get_auth_backend()]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, recording_id):
+        newrelic.agent.add_custom_attributes([("endpoint", "signed_url")])
+        filters = self.get_user_filter(request)
+        try:
+            recording = CallRecording.objects.get(pk=recording_id, **filters)
+        except CallRecording.DoesNotExist:
+            return Response({"error": "Recording not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            signed_url = crm_adapter.get_signed_url(recording.recording_url)
+        except Exception as exc:
+            logger.error("get_signed_url failed for recording_id=%s: %s", recording_id, exc)
+            return Response(
+                {"error": "Failed to generate signed URL"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response({"signed_url": signed_url, "expires_in_seconds": 300})
+
+
+class FlagReviewView(AuditPermissionMixin, APIView):
+    """
+    PATCH /audit/<S>/recordings/<recording_id>/flags/<flag_id>/review/
+    Mark or unmark a compliance flag as reviewed.
+    Restricted to Admin (1), Manager (2), Supervisor (4).
+    """
+    ALLOWED_ROLES = {1, 2, 4}
+    authentication_classes = [get_auth_backend()]
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, recording_id, flag_id):
+        role = self.get_user_role(request)
+        if role not in self.ALLOWED_ROLES:
+            return Response(
+                {"error": "Insufficient permissions. Admin, Manager, or Supervisor required."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            flag = ComplianceFlag.objects.get(pk=flag_id)
+        except ComplianceFlag.DoesNotExist:
+            return Response({"error": "Flag not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        if flag.recording_id != recording_id:
+            return Response({"error": "Flag not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        reviewed = request.data.get("reviewed")
+        if reviewed:
+            flag.reviewed = True
+            flag.reviewed_by = str(request.user.user_id)
+            flag.reviewed_at = timezone.now()
+        else:
+            flag.reviewed = False
+            flag.reviewed_by = None
+            flag.reviewed_at = None
+        flag.save()
+
+        from .serializers import ComplianceFlagSerializer  # noqa: PLC0415
+        return Response(ComplianceFlagSerializer(flag).data)
+
+
+class RecordingRetryView(AuditPermissionMixin, APIView):
+    """
+    POST /audit/<S>/recordings/<recording_id>/retry/
+    Reset a failed recording back to pending for re-submission.
+    Restricted to Admin (1) and Manager (2).
+    """
+    ALLOWED_ROLES = {1, 2}
+    authentication_classes = [get_auth_backend()]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, recording_id):
+        role = self.get_user_role(request)
+        if role not in self.ALLOWED_ROLES:
+            return Response(
+                {"error": "Insufficient permissions. Admin or Manager required."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        filters = self.get_user_filter(request)
+        try:
+            recording = CallRecording.objects.get(pk=recording_id, **filters)
+        except CallRecording.DoesNotExist:
+            return Response({"error": "Recording not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        if recording.status != "failed":
+            return Response(
+                {"error": f"Recording is not in failed status (current: {recording.status})"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        recording.status = "pending"
+        recording.error_message = None
+        recording.save(update_fields=["status", "error_message"])
+
+        return Response({"status": recording.status, "retry_count": recording.retry_count})
 
 
 # ─────────────────────────────────────────────────────────────────────────────

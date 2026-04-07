@@ -12,9 +12,11 @@
 
 ---
 
-## Step 1 — Developer: Merge into crm_apis
+## Step 1 — Developer: Merge into crm_apis ✅ COMPLETE
 
-Run this in the `crm_apis` repo. Full spec is in `Baysys-AI-Call-Auditor/docs/prompts/prompt-J-crm-apis-merge.md`.
+**Branch `call-auditor` is ready. PR from `call-auditor → master` is open. Merge when ready.**
+
+302 tests passing, 0 ruff findings. For reference, the spec is in `Baysys-AI-Call-Auditor/docs/prompts/prompt-J-crm-apis-merge.md`.
 
 ```bash
 # In the crm_apis repo

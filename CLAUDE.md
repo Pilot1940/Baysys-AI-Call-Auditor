@@ -94,7 +94,7 @@ Every session that modifies code MUST update MANIFEST.md, BUILD_LOG.md, and docs
 
 ## Current state (as of 2026-04-05)
 
-- **302 tests passing, 0 ruff findings**
+- **317 tests passing, 0 ruff findings**
 - 5 Django models: CallRecording, CallTranscript, ProviderScore, ComplianceFlag, OwnLLMScore
 - Migrations 0001–0004 applied
 - **PC-Supabase fully configured:** `uvarcl_live.call_logs` (500K rows), `uvarcl_live.users` (662 rows, anonymised), `baysys_call_audit.*` all 5 tables created. Sync can be run end-to-end with no RDS connection needed.

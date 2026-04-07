@@ -25,6 +25,7 @@
 | **I** | **Submit & Poll HTTP endpoints** | **2026-04-07** | — |
 | **K** | **URL secret prefix** | **2026-04-07** | — |
 | **L** | **System status / health check endpoint** | **2026-04-07** | — |
+| **M** | **Phase 1 UI backend: signed-url, flag review, retry + dashboard extended** | **2026-04-07** | — |
 
 ---
 
