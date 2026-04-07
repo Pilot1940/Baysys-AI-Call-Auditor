@@ -310,7 +310,7 @@ class SyncCallLogsView(AuditPermissionMixin, APIView):
         else:
             target_date = None  # run_sync_for_date defaults to yesterday
 
-        batch_size = data.get("batch_size", 5000)
+        batch_size = data.get("batch_size") or getattr(django_settings, "SYNC_BATCH_SIZE", 5000)
         dry_run = data.get("dry_run", False)
         newrelic.agent.add_custom_attributes({
             'sync_date': str(target_date),
@@ -521,7 +521,7 @@ class PollStuckRecordingsView(AuditPermissionMixin, APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
         data = request.data or {}
-        batch_size = data.get("batch_size", 50)
+        batch_size = data.get("batch_size") or getattr(django_settings, "POLL_BATCH_SIZE", 50)
         dry_run = data.get("dry_run", False)
         try:
             result = run_poll_stuck_recordings(batch_size=batch_size, dry_run=dry_run)

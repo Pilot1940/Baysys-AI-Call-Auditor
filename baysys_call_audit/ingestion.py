@@ -146,7 +146,7 @@ def map_sync_row(row_dict: dict) -> dict:
 @newrelic.agent.background_task(name='run_sync_for_date')
 def run_sync_for_date(
     target_date: date | None = None,
-    batch_size: int = 5000,
+    batch_size: int | None = None,
     dry_run: bool = False,
 ) -> dict:
     """
@@ -205,8 +205,9 @@ def run_sync_for_date(
         min_duration = getattr(settings, "SYNC_MIN_CALL_DURATION", 20)
         cursor.execute(SYNC_QUERY, [str(target_date), min_duration])
         raw_rows = cursor.fetchall()
-    if batch_size:
-        raw_rows = raw_rows[:batch_size]
+    effective_batch = batch_size if batch_size is not None else getattr(settings, "SYNC_BATCH_SIZE", 5000)
+    if effective_batch:
+        raw_rows = raw_rows[:effective_batch]
 
     records_to_create: list[CallRecording] = []
 

@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 @newrelic.agent.background_task(name='submit_pending_recordings')
 def submit_pending_recordings(
-    batch_size: int = 100,
+    batch_size: int | None = None,
     tiers: list[str] | None = None,
 ) -> dict:
     """
@@ -52,6 +52,8 @@ def submit_pending_recordings(
     Returns:
         {"submitted": int, "failed": int, "skipped": int}
     """
+    if batch_size is None:
+        batch_size = getattr(settings, "SUBMIT_BATCH_SIZE", 100)
     qs = CallRecording.objects.filter(status="pending")
     if tiers:
         qs = qs.filter(submission_tier__in=tiers)
@@ -259,7 +261,7 @@ def _find_subjective(subjective_data: list, parameter_name: str) -> str | None:
 
 @newrelic.agent.background_task(name='run_poll_stuck_recordings')
 def run_poll_stuck_recordings(
-    batch_size: int = 50,
+    batch_size: int | None = None,
     dry_run: bool = False,
 ) -> dict:
     """
@@ -275,6 +277,8 @@ def run_poll_stuck_recordings(
             "threshold_minutes": int,
         }
     """
+    if batch_size is None:
+        batch_size = getattr(settings, "POLL_BATCH_SIZE", 50)
     threshold_minutes = getattr(settings, "POLL_STUCK_AFTER_MINUTES", 30)
     cutoff = timezone.now() - timezone.timedelta(minutes=threshold_minutes)
     stuck_qs = (
