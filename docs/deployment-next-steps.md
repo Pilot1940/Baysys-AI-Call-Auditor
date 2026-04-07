@@ -1,7 +1,7 @@
 # BaySys Call Audit AI — Deployment Next Steps
 
 **Date:** 2026-04-07
-**Status:** Backend complete (302 tests, 0 linting issues). Phase 1 UI in progress (Prompt M). Ready for crm_apis merge and GreyLabs UAT in parallel.
+**Status:** Backend complete (317 tests, 0 linting issues). Prompts A–P complete. React embed (CRM admin UI) complete. crm_apis branch `call-auditor` pushed, PR open — ready to merge to master.
 
 **What product team gets in Phase 1 UI:**
 - Recordings list with status, agent, tier, fatal level, compliance flags
@@ -12,52 +12,21 @@
 
 ---
 
-## Step 1 — Developer: Merge into crm_apis ✅ COMPLETE
+## Step 1 — Developer: Merge the PR into crm_apis master
 
-**Branch `call-auditor` is ready. PR from `call-auditor → master` is open. Merge when ready.**
+Branch `call-auditor` is fully built and pushed. PR from `call-auditor → master` is open and unblocked. **Merge it.**
 
-302 tests passing, 0 ruff findings. For reference, the spec is in `Baysys-AI-Call-Auditor/docs/prompts/prompt-J-crm-apis-merge.md`.
+317 tests passing, 0 ruff findings. All 5 commits are on the branch: Prompt J (app merge into `arc/baysys_call_audit/`), env templates, Prompt P (final prompt sync), and the `.envs` doc commit.
+
+After merging, confirm tests still pass on master:
 
 ```bash
-# In the crm_apis repo
-git checkout main && git pull
-git checkout -b call-auditor
-
-# Copy the app
-cp -r <path-to-Baysys-AI-Call-Auditor>/baysys_call_audit/  arc/baysys_call_audit/
-
-# Copy config files
-cp <path-to-Baysys-AI-Call-Auditor>/config/*.yaml  config/
-
-# Edit arc/baysys_call_audit/apps.py — change:
-#   name = "baysys_call_audit"
-# to:
-#   name = "arc.baysys_call_audit"
-
-# Edit arc/baysys_call_audit/ingestion.py — replace the _SUBMISSION_PRIORITY_PATH block:
-#   from pathlib import Path
-#   _SUBMISSION_PRIORITY_PATH = Path(django_settings.BASE_DIR) / "config" / "submission_priority.yaml"
-
-# In config/settings/base.py — add to INSTALLED_APPS:
-#   "arc.baysys_call_audit",
-# Add setting:
-#   AUDIT_URL_SECRET = env("AUDIT_URL_SECRET", default="dev-secret")
-#   AUDIT_STATUS_SECRET = env("AUDIT_STATUS_SECRET", default="dev-status-secret")
-
-# In config/urls.py — add alongside trainer route:
-#   from django.conf import settings
-#   path(f"audit/{settings.AUDIT_URL_SECRET}/", include("arc.baysys_call_audit.urls")),
-
-# Verify tests pass
+# In the crm_apis repo, on master after merge
 python -m pytest arc/baysys_call_audit/tests/ -q
 ruff check arc/baysys_call_audit/
-
-# Commit and raise PR
-git add arc/baysys_call_audit/ config/*.yaml config/settings/base.py config/urls.py
-git commit -m "feat: merge baysys_call_audit into crm_apis (Prompt J)"
-# Raise PR: call-auditor → main
-# Do NOT merge to main until env vars are confirmed in production
 ```
+
+**Do NOT deploy to production until Step 2 (env vars) is complete.**
 
 ---
 
@@ -175,7 +144,7 @@ All paths require `AUDIT_URL_SECRET` as `<S>`.
 ## What's in the code
 
 - **10 API endpoints** covering ingestion, submission, webhook, dashboard, and ops
-- **302 automated tests**, 0 linting issues
+- **317 automated tests**, 0 linting issues
 - **Config-driven compliance engine** — rules in `config/compliance_rules.yaml`, no code changes needed to adjust thresholds
 - **Fatal level scoring** (0–5) — weighted boolean parameters from `config/fatal_level_rules.yaml`
 - **New Relic APM** instrumented — all pipeline operations tracked as named transactions

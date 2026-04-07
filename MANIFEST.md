@@ -1,7 +1,7 @@
 # BaySys Call Audit AI — Code Repository Manifest
 
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
-**Last updated:** Session 14 (Prompt M — Phase 1 UI backend endpoints — complete)
+**Last updated:** Session 14 (Prompt P — crm_apis fully synced; PR call-auditor → master unblocked)
 **Test count:** 317 passing
 **Ruff findings:** 0
 **Open issues:** TBD (issues created after push)

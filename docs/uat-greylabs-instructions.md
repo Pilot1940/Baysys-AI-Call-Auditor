@@ -8,10 +8,9 @@
 
 ## Prerequisites
 
-- Prompt I complete (291 tests, `/submit/` and `/poll/` endpoints live)
-- Prompt K complete (`AUDIT_URL_SECRET` in place, all endpoints behind URL secret)
-- Prompt J complete (app merged into crm_apis, deployed to production)
-- GreyLabs credentials in `.envs/.production/.django`
+- crm_apis `call-auditor` branch merged to master and deployed to production (317 tests, 0 ruff)
+- Steps 1–4 of `docs/deployment-next-steps.md` complete — env vars set, migrations applied, smoke tests passing
+- GreyLabs UAT credentials received from Kanishk Gunsola and added to `.envs/.production/.django`
 
 **Note on `<SECRET>`:** Replace `<SECRET>` throughout with your `AUDIT_URL_SECRET` env var value (a UUID). Without it every endpoint returns 404.
 

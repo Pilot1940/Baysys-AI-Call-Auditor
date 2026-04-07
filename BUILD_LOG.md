@@ -26,6 +26,77 @@
 | **K** | **URL secret prefix** | **2026-04-07** | — |
 | **L** | **System status / health check endpoint** | **2026-04-07** | — |
 | **M** | **Phase 1 UI backend: signed-url, flag review, retry + dashboard extended** | **2026-04-07** | — |
+| **N** | **CRM React embed: call-audit-frontend-embed branch in crm repo** | **2026-04-07** | — |
+| **P** | **crm_apis sync: Prompt M views + serializer + urls + tests → arc/baysys_call_audit** | **2026-04-07** | — |
+
+---
+
+## Session 14 (cont.) — Prompt P: crm_apis Sync (Prompt M → arc/baysys_call_audit)
+
+**Date:** 2026-04-07
+**Scope:** Brought `arc/baysys_call_audit` in crm_apis to full parity with standalone at Prompt M. Previously merged at Prompt J (302 tests); missing 3 views, extended dashboard, serializer fields.
+
+### Files modified (crm_apis `call-auditor` branch, commit f131991)
+
+| File | Changes |
+|------|---------|
+| `arc/baysys_call_audit/views.py` | Added `Q` + `crm_adapter` imports; extended `DashboardSummaryView.get()` with `submitted`, `last_sync_at`, `last_completed_at`, `agent_summary`; inserted `RecordingSignedUrlView`, `FlagReviewView`, `RecordingRetryView` |
+| `arc/baysys_call_audit/serializers.py` | Added `submitted`, `last_sync_at`, `last_completed_at`, `agent_summary` to `DashboardSummarySerializer` |
+| `arc/baysys_call_audit/urls.py` | 3 new imports + 3 new URL routes (`signed-url`, `retry`, `flag-review`) |
+| `arc/baysys_call_audit/tests/test_views.py` | Added `APIRequestFactory`/`patch` imports + 4 new test classes (14 tests) |
+
+### Notes
+
+- ruff: 0 findings
+- Tests not run locally (crm_apis connects to production RDS — cannot create test DB without remote access). Identical logic passes 317/317 in standalone.
+- PR `call-auditor → master` in crm_apis is now unblocked.
+
+---
+
+## Session 14 (cont.) — Prompt N: CRM React Embed + Code Review
+
+**Date:** 2026-04-07
+**Scope:** Full admin-only Call Audit UI embedded in the CRM React repo on branch `call-audit-frontend-embed`. Standalone repo received Prompt M fixes and code review. ESLint clean (7 errors fixed across pre-existing + new).
+
+### CRM repo files created (branch: `call-audit-frontend-embed`)
+
+| File | Purpose |
+|------|---------|
+| `src/hooks/useAuditAuth.ts` | Auth adapter — mirrors `useTrainerAuth`, returns `{ user, isAdmin, isLoading }` |
+| `src/utils/auditAxios.ts` | Axios instance — `VITE_AUDIT_URL_SECRET` sourced URL prefix, cookie + Bearer fallback |
+| `src/utils/auditApi.ts` | Typed endpoint constants for all 10 audit endpoints |
+| `src/types/audit.ts` | TypeScript interfaces for all backend response shapes |
+| `src/pages/audit/AuditDashboardPage.tsx` | Stats cards, recordings table (filters), agents leaderboard, ops panel |
+| `src/pages/audit/AuditCallDetailPage.tsx` | Audio player, flags (mark reviewed), scorecard, transcript, retry |
+
+### CRM repo files modified
+
+| File | Changes |
+|------|---------|
+| `src/App.tsx` | Added `AdminRoute` guard + 2 audit routes; eslint-disable for pre-existing `TrainerRoute` dead code |
+| `src/components/Header.tsx` | Added `ClipboardCheck` icon + "Call Audit" nav item (admin only); fixed 4 pre-existing ESLint issues |
+| `src/layouts/DashboardLayout.tsx` | Added `isAuditPage` to remove container padding for audit pages |
+
+### Code review findings (2026-04-07)
+
+- 0 CRITICAL / 1 HIGH / 1 MEDIUM / 1 MINOR
+- **H-1 (BLOCK):** crm_apis `arc/baysys_call_audit` missing Prompt M (3 views + dashboard extensions). Prompt P needed before merging PR `call-auditor → master`.
+- **M-1:** crm_apis `.envs` changes uncommitted — commit before closing branch.
+- **MINOR (fixed):** 7 ESLint errors resolved — `fmtPct` unused (Prompt N), `TrainerRoute` unused (pre-existing), `catch(err)` unused (pre-existing), 4× `any` (pre-existing).
+
+### Automated checks (post-review)
+
+- tsc: 0 errors
+- eslint: 0 errors, 0 warnings (all 9 Prompt N files + App.tsx + Header.tsx + DashboardLayout.tsx)
+- ruff (standalone + crm_apis): 0 findings
+- pytest: 317/317 (from Prompt M — not re-run this session)
+
+### Pending
+
+- Prompt P: sync Prompt M to crm_apis before merging PR
+- Merge PR `call-auditor → master` in crm_apis
+- Set production env vars and run migrations
+- GreyLabs UAT
 
 ---
 
