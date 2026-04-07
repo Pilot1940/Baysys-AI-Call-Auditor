@@ -137,10 +137,14 @@ def process_provider_webhook(payload: dict) -> CallRecording | None:
     Returns:
         The updated CallRecording, or None if recording not found.
     """
+    # GreyLabs wraps results in a "details" array — unwrap to get the actual record
+    details = payload.get("details", [])
+    record = details[0] if details else payload
+
     resource_id = (
-        payload.get("resource_insight_id")
-        or payload.get("resource_id")
-        or payload.get("id")
+        record.get("resource_insight_id")
+        or record.get("resource_id")
+        or record.get("id")
     )
     if not resource_id:
         logger.warning("Webhook payload missing resource_id: %s", payload)
@@ -165,16 +169,16 @@ def process_provider_webhook(payload: dict) -> CallRecording | None:
         return recording
 
     # Create transcript
-    _create_transcript(recording, payload)
+    _create_transcript(recording, record)
 
     # Create provider scores
-    score = _create_provider_score(recording, payload)
+    score = _create_provider_score(recording, record)
 
     # Compute fatal level from provider boolean scores
     compute_fatal_level(recording, score)
 
     # Run provider compliance rules (config-driven)
-    check_provider_compliance(recording, payload)
+    check_provider_compliance(recording, record)
 
     # Mark complete
     recording.status = "completed"

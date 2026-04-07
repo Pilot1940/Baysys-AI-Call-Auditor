@@ -97,7 +97,10 @@ def submit_recording(
         raise exc
 
     data = resp.json()
-    resource_id = data.get("resource_insight_id") or data.get("id")
+    # GreyLabs may wrap the result in a "details" array — unwrap to get the actual record
+    details = data.get("details", [])
+    record = details[0] if details else data
+    resource_id = record.get("resource_insight_id") or record.get("id")
     if not resource_id:
         raise ProviderError(
             "Submit succeeded but no resource_id in response",
