@@ -297,6 +297,9 @@ class SyncCallLogsView(AuditPermissionMixin, APIView):
         # Parse date
         date_str = data.get("date")
         if date_str:
+            # Truncate to date portion — JS date pickers often send full ISO datetime strings
+            # e.g. "2026-04-07T00:00:00.000Z" → "2026-04-07"
+            date_str = str(date_str)[:10]
             try:
                 target_date = date.fromisoformat(date_str)
             except (ValueError, TypeError):
