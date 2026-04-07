@@ -16,6 +16,64 @@
 
 ---
 
+## Doing the UAT via the Admin UI (no curl needed)
+
+The full UAT workflow can be done through the CRM admin UI without any curl commands. Access is Admin-only (`role_id = 1`) — the "Call Audit" section appears in the nav after login.
+
+### Step 1 — Sync calls
+
+In the dashboard, find the **Operations panel** (always visible on the right). Use the **"Sync date"** date picker — select a recent date with real agent calls, then click Sync. The stats bar updates immediately showing how many calls were created.
+
+Pick a date where `total_fetched` ≥ 10. If the count is low, try the previous day.
+
+### Step 2 — Confirm calls are pending
+
+The **pipeline stats bar** at the top of the dashboard shows live counts:
+
+| Card | What it means |
+|---|---|
+| Synced today | Recordings created today |
+| Pending | Awaiting submission to GreyLabs |
+| In queue | Submitted, waiting for GreyLabs response |
+| Scored | Completed and scored (shown as "Scored" in UI, `completed` in DB) |
+| Failed | Errored — check logs |
+
+After sync, the **Pending** count should show ≥ 10. Below the cards: "Last sync: X minutes ago".
+
+### Step 3 — Submit to GreyLabs
+
+Click **"Submit pending calls"** in the Operations panel. The button is disabled if Pending = 0. A toast confirms how many were submitted. The Pending count drops to 0 and **In queue** rises.
+
+### Step 4 — Monitor scoring
+
+Watch the stats bar. As GreyLabs processes calls (15–30 min), **In queue** drops and **Scored** rises. The recordings table updates in real time — completed calls show a score badge (Excellent / Good / Needs Improvement / Critical) and a fatal level chip.
+
+If any calls stay "In queue" after 30 minutes, click **"Recover stuck calls"** (tick the dry-run checkbox first to preview, then run it for real). A toast shows how many were recovered.
+
+### Step 5 — Review results in the recordings table
+
+The recordings table shows all calls with columns: Call date, Agent, Product, Bank, Tier, Status, Score %, Fatal level. Filterable by status, date range, and agent name. Click any row to open the call detail page.
+
+### Step 6 — Call detail page
+
+Each call detail page has four sections:
+
+**Audio player** — plays the actual recorded call directly in the browser. No download or separate tool needed.
+
+**Metadata Compliance** — flags detected at ingestion time (calling hours violations, Sunday calls, public holiday calls, max calls per customer). Visible even for calls still in queue. Each flag shows severity, type, and evidence. Admins can click "Mark reviewed" to log that a flag has been assessed.
+
+**Call Quality Score** — appears once GreyLabs scores the call. Shows overall score percentage with a colour band, a FATAL banner if any fatal parameter triggered, and four collapsible group sections (Introduction Quality / Call Quality / Compliance & RBI / Scam & Trust) with the 19 individual parameter scores.
+
+**Call Transcript** — scrollable full transcript once available. Above the transcript: total call duration, agent talk %, customer talk % as a bar.
+
+If a call shows **Failed**: a "Retry this call" button re-queues it for submission.
+
+### Step 7 — Agent leaderboard
+
+Switch to the **Agent leaderboard** tab on the dashboard. Shows per-agent: calls scored, average score, score band, fatal flag count. Clicking a row filters the recordings table to that agent's calls.
+
+---
+
 ## Phase 1 — Configure GreyLabs credentials
 
 Set these in `.envs/.production/.django` (or your production secret store):
@@ -38,11 +96,27 @@ Should return 200 with a (possibly empty) recordings list.
 
 ---
 
-## Phase 2 — Load 10–20 calls into the system
+## Phase 2 — Sync calls from production into the system
 
-### Option A — Sync from call_logs table (preferred)
+Calls are already live in `uvarcl_live` (Supabase production). The sync reads directly from `call_logs` — no CSV, no manual data prep.
 
-Trigger via HTTP:
+### What the sync does
+
+The sync runs a SQL query against `uvarcl_live.call_logs` joined with `uvarcl_live.users`. It automatically filters to:
+- Calls on the target date (`call_start_time::date = <date>`)
+- Calls with a recording file (`recording_s3_path IS NOT NULL`)
+- Calls longer than 20 seconds (`call_duration > 20`) — configurable via `SYNC_MIN_CALL_DURATION` setting
+
+Fields pulled per call: agent_id, agent name (from users table), agency_id, customer_id, customer phone, recording S3 path, call start time, call duration, campaign name (maps to bank_name), loan_id (maps to portfolio_id).
+
+Dedup is automatic — if a recording URL is already in the system, it's skipped. Safe to re-run for the same date.
+
+Each synced recording is auto-assigned a **submission tier** (`immediate` / `normal` / `off_peak`) based on `config/submission_priority.yaml` rules (agency_id, bank_name, product_type). This controls processing priority — for UAT it doesn't matter, all pending recordings are submitted together.
+
+### Run the sync
+
+Pick a recent date with real agent calls in `call_logs`:
+
 ```bash
 curl -X POST https://<your-domain>/audit/<SECRET>/recordings/sync/ \
   -H "Authorization: Token <admin-token>" \
@@ -50,24 +124,78 @@ curl -X POST https://<your-domain>/audit/<SECRET>/recordings/sync/ \
   -d '{"date": "2026-04-07"}'
 ```
 
-Returns: `{"synced": N, "skipped": N, "errors": N}`
+**Optional parameters:**
+- `"dry_run": true` — shows what would be created without writing anything, useful to check a date before committing
+- `"batch_size": 5000` — default is 5000, lower this if you want to limit the sync
 
-Use any date that has real calls in the `call_logs` table. Aim for a date with 10–20 records.
+**Response fields explained:**
+```json
+{
+  "status": "ok",
+  "date": "2026-04-07",
+  "dry_run": false,
+  "total_fetched": 45,
+  "created": 38,
+  "skipped_dedup": 6,
+  "skipped_validation": 1,
+  "unknown_agents": 2,
+  "errors": 0
+}
+```
+- `total_fetched` — rows returned by the SQL query (has recording + duration > 20s)
+- `created` — new CallRecording rows created, status set to `pending`
+- `skipped_dedup` — already in the system from a previous sync of this date
+- `skipped_validation` — missing agent_id, recording URL, or call datetime — check server logs
+- `unknown_agents` — agent_id not found in `users` table; recording is still created, agent_name = "Unknown"
+- `errors` — unexpected exceptions — check server logs if > 0
 
-### Option B — CSV import
+### Pick a good date
 
-Download 10–20 rows from your call_logs table, save as `uat_calls.csv` with these columns:
+If you're not sure which date has calls, run a dry_run first:
 
+```bash
+curl -X POST https://<your-domain>/audit/<SECRET>/recordings/sync/ \
+  -H "Authorization: Token <admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"date": "2026-04-06", "dry_run": true}'
+```
+
+A date is good for UAT if `total_fetched` ≥ 10 and `errors` = 0.
+
+### Alternative: CSV import (not needed in production)
+
+In production, calls are already in `uvarcl_live` — use the sync above. CSV import exists as a fallback for testing environments or one-off loads only.
+
+Export rows from `call_logs` with these columns:
 ```
 call_id, agent_id, customer_id, call_date, call_duration_seconds, recording_url, loan_account_number
 ```
 
-Upload via HTTP:
 ```bash
 curl -X POST https://<your-domain>/audit/<SECRET>/recordings/import/ \
   -H "Authorization: Token <admin-token>" \
   -F "file=@uat_calls.csv"
 ```
+
+Supports `?dry_run=true` as a query param. Same dedup rules apply.
+
+---
+
+### Filter after sync (optional)
+
+Once synced, you can inspect what's pending and narrow by agent before submitting:
+
+```bash
+# All pending recordings for the date
+curl "https://<your-domain>/audit/<SECRET>/recordings/?status=pending&date_from=2026-04-07&date_to=2026-04-07" \
+  -H "Authorization: Token <admin-token>"
+
+# Pending for a specific agent
+curl "https://<your-domain>/audit/<SECRET>/recordings/?status=pending&agent_id=<agent_id>" \
+  -H "Authorization: Token <admin-token>"
+```
+
+Supported list filters: `?status=`, `?agent_id=`, `?date_from=`, `?date_to=`, `?page=`, `?page_size=` (max 100 per page).
 
 ---
 
@@ -107,13 +235,13 @@ curl -X GET "https://<your-domain>/audit/<SECRET>/recordings/?status=submitted" 
 GreyLabs will POST results to `https://<your-domain>/audit/<SECRET>/webhook/provider/` as they complete.
 
 Each webhook call will:
-1. Update the recording status to `scored`
+1. Update the recording status to `completed`
 2. Store raw provider output
 3. Trigger compliance scoring
 
 Monitor progress:
 ```bash
-curl -X GET "https://<your-domain>/audit/<SECRET>/recordings/?status=scored" \
+curl -X GET "https://<your-domain>/audit/<SECRET>/recordings/?status=completed" \
   -H "Authorization: Token <admin-token>"
 ```
 
@@ -150,7 +278,7 @@ curl -X GET https://<your-domain>/audit/<SECRET>/recordings/<recording_id>/ \
 ```
 
 Look for:
-- `"status": "scored"` — provider results received
+- `"status": "completed"` — provider results received
 - `"provider_score"` — GreyLabs raw score
 - `"own_llm_score"` — our compliance score (if LLM scoring triggered)
 
