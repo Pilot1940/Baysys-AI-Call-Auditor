@@ -32,6 +32,7 @@ class SubmitRecordingTests(TestCase):
             template_id="TPL-001",
             agent_id="A001",
             agent_name="Test Agent",
+            customer_id="C001",
             recording_datetime="2026-04-01T10:00:00Z",
             callback_url="https://example.com/webhook/",
         )
@@ -51,6 +52,7 @@ class SubmitRecordingTests(TestCase):
                 template_id="TPL-001",
                 agent_id="A001",
                 agent_name="Test Agent",
+                customer_id="C001",
                 recording_datetime="2026-04-01T10:00:00Z",
                 callback_url="https://example.com/webhook/",
             )
@@ -69,6 +71,7 @@ class SubmitRecordingTests(TestCase):
                 template_id="TPL-001",
                 agent_id="A001",
                 agent_name="Test Agent",
+                customer_id="C001",
                 recording_datetime="2026-04-01T10:00:00Z",
                 callback_url="https://example.com/webhook/",
             )

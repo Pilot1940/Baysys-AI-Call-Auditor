@@ -88,6 +88,7 @@ def submit_pending_recordings(
                 template_id=template_id,
                 agent_id=recording.agent_id,
                 agent_name=recording.agent_name,
+                customer_id=str(recording.customer_id) if recording.customer_id else str(recording.id),
                 recording_datetime=recording.recording_datetime.isoformat(),
                 callback_url=callback_url,
             )

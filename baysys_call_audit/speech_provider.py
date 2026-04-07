@@ -48,6 +48,7 @@ def submit_recording(
     template_id: str,
     agent_id: str,
     agent_name: str,
+    customer_id: str,
     recording_datetime: str,
     callback_url: str,
 ) -> str:
@@ -74,6 +75,7 @@ def submit_recording(
         "template_id": template_id,
         "agent_id": agent_id,
         "agent_name": agent_name,
+        "customer_id": customer_id,
         "recording_datetime": recording_datetime,
         "callback_url": callback_url,
     }
