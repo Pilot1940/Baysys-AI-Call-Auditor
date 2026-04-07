@@ -72,6 +72,27 @@ class ProviderWebhookView(APIView):
                 return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
 
         payload = request.data
+
+        # GreyLabs may send JSON with a non-JSON Content-Type header.
+        # If DRF didn't parse it (payload is str/bytes), parse manually.
+        if isinstance(payload, (str, bytes)):
+            import json as _json
+            try:
+                payload = _json.loads(payload)
+            except (ValueError, TypeError):
+                logger.warning("ProviderWebhookView: unparseable payload: %r", payload)
+                return Response(
+                    {"error": "Invalid JSON payload"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if not isinstance(payload, dict):
+            logger.warning("ProviderWebhookView: payload is not a dict: %r", type(payload))
+            return Response(
+                {"error": "Payload must be a JSON object"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         if not payload:
             return Response(
                 {"error": "Empty payload"},
