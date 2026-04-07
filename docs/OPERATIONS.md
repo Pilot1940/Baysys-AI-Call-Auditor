@@ -357,7 +357,7 @@ All cron jobs run from the project root with the virtualenv activated. Replace `
 | `DATABASE_URL` | Yes | — | Supabase connection string |
 | `DB_SCHEMA` | No | baysys_call_audit | PostgreSQL search_path |
 | `AUDIT_AUTH_BACKEND` | No | mock | `mock` for dev, `crm` for production |
-| `SPEECH_PROVIDER_HOST` | No | https://api.greylabs.ai | Provider API base URL |
+| `SPEECH_PROVIDER_HOST` | Yes | — | Provider API base URL (no default — must be set explicitly) |
 | `SPEECH_PROVIDER_API_KEY` | Yes | — | Provider API key |
 | `SPEECH_PROVIDER_API_SECRET` | Yes | — | Provider API secret |
 | `SPEECH_PROVIDER_TEMPLATE_ID` | Yes | — | Provider scoring template ID |
