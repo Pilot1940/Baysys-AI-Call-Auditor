@@ -205,6 +205,8 @@ def run_sync_for_date(
         min_duration = getattr(settings, "SYNC_MIN_CALL_DURATION", 20)
         cursor.execute(SYNC_QUERY, [str(target_date), min_duration])
         raw_rows = cursor.fetchall()
+    if batch_size:
+        raw_rows = raw_rows[:batch_size]
 
     for db_row in raw_rows:
         counts["fetched"] += 1
