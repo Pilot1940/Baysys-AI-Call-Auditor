@@ -107,7 +107,10 @@ def submit_pending_recordings(
             recording.save(update_fields=["retry_count", "status", "error_message"])
             counts["failed"] += 1
             newrelic.agent.record_custom_metric('Custom/Pipeline/Recordings/SubmitFailed', 1)
-            logger.warning("Failed to submit recording %s: %s", recording.pk, exc)
+            logger.warning(
+                "Failed to submit recording %s: %s | response_body=%s",
+                recording.pk, exc, exc.response_body,
+            )
 
     logger.info(
         "Batch submission complete: %d submitted, %d failed, %d skipped",

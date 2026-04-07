@@ -78,7 +78,7 @@ def submit_recording(
         "callback_url": callback_url,
     }
 
-    resp = requests.post(url, data=payload, headers=_get_headers(), timeout=30)
+    resp = requests.post(url, json=payload, headers=_get_headers(), timeout=30)
 
     if resp.status_code != 200:
         exc = ProviderError(
