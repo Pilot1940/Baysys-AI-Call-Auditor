@@ -111,8 +111,14 @@ class RecordingListView(AuditPermissionMixin, APIView):
             qs = qs.filter(recording_datetime__date__lte=request.query_params["date_to"])
 
         # Pagination
-        page = int(request.query_params.get("page", 1))
-        page_size = min(int(request.query_params.get("page_size", 25)), 100)
+        try:
+            page = max(1, int(request.query_params.get("page", 1)))
+        except (ValueError, TypeError):
+            page = 1
+        try:
+            page_size = min(max(1, int(request.query_params.get("page_size", 25))), 100)
+        except (ValueError, TypeError):
+            page_size = 25
         start = (page - 1) * page_size
         end = start + page_size
         total = qs.count()
@@ -245,8 +251,14 @@ class ComplianceFlagListView(AuditPermissionMixin, APIView):
             qs = qs.filter(recording_id=request.query_params["recording_id"])
 
         # Pagination
-        page = int(request.query_params.get("page", 1))
-        page_size = min(int(request.query_params.get("page_size", 25)), 100)
+        try:
+            page = max(1, int(request.query_params.get("page", 1)))
+        except (ValueError, TypeError):
+            page = 1
+        try:
+            page_size = min(max(1, int(request.query_params.get("page_size", 25))), 100)
+        except (ValueError, TypeError):
+            page_size = 25
         start = (page - 1) * page_size
         end = start + page_size
         total = qs.count()

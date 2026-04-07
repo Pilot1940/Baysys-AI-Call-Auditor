@@ -77,6 +77,9 @@ All paths are prefixed with `AUDIT_URL_SECRET` — e.g. `/audit/<URL_SECRET>/rec
 | POST | `/audit/<S>/recordings/poll/` | Admin/Manager | Poll provider for stuck recordings |
 | GET | `/audit/<S>/recordings/` | Yes | Paginated recording list |
 | GET | `/audit/<S>/recordings/<id>/` | Yes | Recording detail with transcript, scores, flags |
+| GET | `/audit/<S>/recordings/<id>/signed-url/` | Yes | Signed S3 URL for audio playback |
+| POST | `/audit/<S>/recordings/<id>/retry/` | Admin/Manager | Retry a failed recording |
+| POST | `/audit/<S>/recordings/<id>/flags/<flag_id>/review/` | Admin/Manager/Supervisor | Mark/unmark compliance flag reviewed |
 | GET | `/audit/<S>/dashboard/summary/` | Yes | Aggregate dashboard stats |
 | GET | `/audit/<S>/compliance-flags/` | Yes | Compliance flag list |
 | GET | `/audit/<S>/admin/status/?token=<AUDIT_STATUS_SECRET>` | Token | Health check: migrations, git, recording activity, env vars |

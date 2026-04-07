@@ -93,7 +93,7 @@ AUDIT_AUTH_BACKEND = config("AUDIT_AUTH_BACKEND", default="mock")
 AUDIT_USE_MOCK_AUTH = AUDIT_AUTH_BACKEND == "mock"
 
 # Speech analytics provider
-SPEECH_PROVIDER_HOST = config("SPEECH_PROVIDER_HOST", default="https://api.greylabs.ai")
+SPEECH_PROVIDER_HOST = config("SPEECH_PROVIDER_HOST", default="")
 SPEECH_PROVIDER_API_KEY = config("SPEECH_PROVIDER_API_KEY", default="")
 SPEECH_PROVIDER_API_SECRET = config("SPEECH_PROVIDER_API_SECRET", default="")
 SPEECH_PROVIDER_TEMPLATE_ID = config("SPEECH_PROVIDER_TEMPLATE_ID", default="")

@@ -62,7 +62,7 @@ All interaction with the speech analytics provider goes through `speech_provider
 ### 2. `crm_adapter.py` is the single mock/prod seam
 Same pattern as Trainer. `AUDIT_AUTH_BACKEND=mock` in dev, `=crm` in prod. All CRM imports inside function bodies only with `# noqa: PLC0415`.
 
-### 3. Test gate: 302 tests passing, 0 ruff findings
+### 3. Test gate: 317 tests passing, 0 ruff findings
 Before any commit or review:
 ```bash
 python manage.py test --settings=settings_test -v 0   # must pass
