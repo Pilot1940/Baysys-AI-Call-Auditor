@@ -46,15 +46,18 @@ def load_compliance_rules() -> dict:
     """Load and return config/compliance_rules.yaml. Returns empty dict on error."""
     path = _BASE_DIR / "config" / "compliance_rules.yaml"
     try:
-        with open(path, encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-        return data if isinstance(data, dict) else {}
+        raw = path.read_text(encoding="utf-8")
+        data = yaml.safe_load(raw)
+        if not isinstance(data, dict):
+            return {}
     except FileNotFoundError:
         logger.warning("Compliance rules file not found: %s", path)
         return {}
     except yaml.YAMLError as exc:
         logger.warning("Malformed compliance rules YAML: %s", exc)
         return {}
+    _sync_content_hash(path, raw, data)
+    return data
 
 
 def load_fatal_level_rules() -> dict:
@@ -72,16 +75,7 @@ def load_fatal_level_rules() -> dict:
         logger.warning("Malformed fatal level rules YAML: %s", exc)
         return {}
 
-    # Verify content hash
-    stored_hash = data.get("content_hash", "")
-    if stored_hash:
-        computed = compute_content_hash(raw)
-        if computed != stored_hash:
-            logger.warning(
-                "fatal_level_rules.yaml content hash mismatch — "
-                "file may have been modified outside version control"
-            )
-
+    _sync_content_hash(path, raw, data)
     return data
 
 
@@ -90,6 +84,38 @@ def compute_content_hash(raw_yaml: str) -> str:
     lines = raw_yaml.splitlines(keepends=True)
     filtered = [line for line in lines if not line.strip().startswith("content_hash:")]
     return hashlib.sha256("".join(filtered).encode("utf-8")).hexdigest()
+
+
+def _sync_content_hash(path: Path, raw: str, data: dict) -> None:
+    """
+    If content_hash in data mismatches the computed hash, rewrite the file
+    with the correct hash and log a warning. No-op if hashes match or no
+    stored hash exists yet.
+    """
+    stored_hash = data.get("content_hash", "")
+    computed = compute_content_hash(raw)
+    if stored_hash == computed:
+        return
+    # Mismatch — auto-update the hash line and rewrite the file
+    lines = raw.splitlines(keepends=True)
+    new_lines = [
+        f"content_hash: {computed}\n" if ln.strip().startswith("content_hash:") else ln
+        for ln in lines
+    ]
+    # If no content_hash line exists yet, insert after first comment block
+    if not any(ln.strip().startswith("content_hash:") for ln in lines):
+        for i, ln in enumerate(new_lines):
+            if not ln.startswith("#") and ln.strip():
+                new_lines.insert(i, f"content_hash: {computed}\n")
+                break
+    path.write_text("".join(new_lines), encoding="utf-8")
+    logger.warning(
+        "%s content_hash %s — auto-updated to %s. "
+        "Commit the updated file to version control.",
+        path.name,
+        "was missing" if not stored_hash else f"mismatch (stored={stored_hash[:12]}…)",
+        computed[:12] + "…",
+    )
 
 
 @lru_cache(maxsize=4)
