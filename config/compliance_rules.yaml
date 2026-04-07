@@ -1,6 +1,9 @@
 # Compliance rules configuration
 # Each rule: id, name, enabled, check_type, severity, flag_type, params, description
 # Settings overrides: where a Django setting exists for the same param, it takes precedence.
+# content_hash is SHA-256 of this file excluding the content_hash line itself.
+# Recompute with: python3 -c "import hashlib; raw=open('config/compliance_rules.yaml').read(); lines=raw.splitlines(keepends=True); filtered=[l for l in lines if not l.strip().startswith('content_hash:')]; print(hashlib.sha256(''.join(filtered).encode()).hexdigest())"
+content_hash: b2f249782f71fe8cbb97f91f2ae460866ec517e194115b99ca9f71450dc4230b
 
 metadata_rules:
   - id: M1
