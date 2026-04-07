@@ -60,6 +60,7 @@ def submit_recording(
         template_id: Provider template identifier for scoring.
         agent_id: CRM agent identifier.
         agent_name: Agent display name.
+        customer_id: Unique customer identifier; uses 'unknown_<id>' if not available.
         recording_datetime: ISO 8601 datetime of the recording.
         callback_url: Webhook URL for provider to POST results to.
 
