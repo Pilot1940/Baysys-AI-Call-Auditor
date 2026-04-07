@@ -242,7 +242,8 @@ def run_sync_for_date(
             counts["skipped_validation"] += 1
             continue
         if timezone.is_naive(recording_dt):
-            recording_dt = timezone.make_aware(recording_dt)
+            from zoneinfo import ZoneInfo  # noqa: PLC0415
+            recording_dt = timezone.make_aware(recording_dt, ZoneInfo("Asia/Kolkata"))
 
         tier = _determine_submission_tier(mapped)
 
