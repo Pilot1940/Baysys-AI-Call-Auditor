@@ -73,11 +73,11 @@ def submit_pending_recordings(
             continue
 
         try:
-            newrelic.agent.add_custom_attributes({
-                'recording_id': recording.pk,
-                'agent_id': recording.agent_id,
-                'submission_tier': recording.submission_tier,
-            })
+            newrelic.agent.add_custom_attributes([
+                ('recording_id', recording.pk),
+                ('agent_id', recording.agent_id),
+                ('submission_tier', recording.submission_tier),
+            ])
             # Re-sign URL immediately before submission — stored URL may have expired
             try:
                 signed_url = get_signed_url(recording.recording_url)
@@ -156,11 +156,11 @@ def process_provider_webhook(payload: dict) -> CallRecording | None:
         logger.warning("No CallRecording for resource_id=%s", resource_id)
         return None
 
-    newrelic.agent.add_custom_attributes({
-        'recording_id': recording.pk,
-        'agent_id': recording.agent_id,
-        'provider_resource_id': resource_id,
-    })
+    newrelic.agent.add_custom_attributes([
+        ('recording_id', recording.pk),
+        ('agent_id', recording.agent_id),
+        ('provider_resource_id', resource_id),
+    ])
 
     # Idempotency: skip if already completed
     if recording.status == "completed":
