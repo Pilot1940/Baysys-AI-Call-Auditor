@@ -208,6 +208,8 @@ def run_sync_for_date(
     if batch_size:
         raw_rows = raw_rows[:batch_size]
 
+    records_to_create: list[CallRecording] = []
+
     for db_row in raw_rows:
         counts["fetched"] += 1
         row_dict = dict(zip(SYNC_COLUMN_NAMES, db_row))
@@ -224,27 +226,68 @@ def run_sync_for_date(
                 counts["created"] += 1
             continue
 
-        try:
-            recording_url = str(mapped.get("recording_url") or "").strip()
-            if recording_url and recording_url in existing_urls:
-                counts["skipped_dedup"] += 1
-                continue
+        recording_url = str(mapped.get("recording_url") or "").strip()
+        if recording_url and recording_url in existing_urls:
+            counts["skipped_dedup"] += 1
+            continue
 
-            recording, created = create_recording_from_row(
-                mapped,
-                existing_urls=existing_urls,
-                call_counts_cache=call_counts_cache,
-            )
-            if created:
-                counts["created"] += 1
-                existing_urls.add(recording_url)
-            elif recording is None:
-                counts["skipped_validation"] += 1
-            else:
-                counts["skipped_dedup"] += 1
+        errors = validate_row(mapped)
+        if errors:
+            counts["skipped_validation"] += 1
+            logger.debug("Row validation failed: %s", errors)
+            continue
+
+        recording_dt = parse_datetime_flexible(mapped["recording_datetime"])
+        if recording_dt is None:
+            counts["skipped_validation"] += 1
+            continue
+        if timezone.is_naive(recording_dt):
+            recording_dt = timezone.make_aware(recording_dt)
+
+        tier = _determine_submission_tier(mapped)
+
+        records_to_create.append(CallRecording(
+            agent_id=str(mapped["agent_id"]).strip(),
+            agent_name=str(mapped.get("agent_name") or "Unknown").strip(),
+            customer_id=str(mapped["customer_id"]).strip() if mapped.get("customer_id") else None,
+            portfolio_id=str(mapped["portfolio_id"]).strip() if mapped.get("portfolio_id") else None,
+            supervisor_id=str(mapped["supervisor_id"]).strip() if mapped.get("supervisor_id") else None,
+            agency_id=str(mapped["agency_id"]).strip() if mapped.get("agency_id") else None,
+            recording_url=recording_url,
+            recording_datetime=recording_dt,
+            customer_phone=str(mapped["customer_phone"]).strip() if mapped.get("customer_phone") else None,
+            product_type=str(mapped["product_type"]).strip() if mapped.get("product_type") else None,
+            bank_name=str(mapped["bank_name"]).strip() if mapped.get("bank_name") else None,
+            status="pending",
+            submission_tier=tier,
+        ))
+        # Mark seen so within-batch duplicates are skipped
+        existing_urls.add(recording_url)
+        # Update per-customer count so compliance sees accurate totals
+        if mapped.get("customer_id"):
+            cid = str(mapped["customer_id"]).strip()
+            call_counts_cache[cid] = call_counts_cache.get(cid, 0) + 1
+
+    if records_to_create:
+        try:
+            CallRecording.objects.bulk_create(records_to_create, ignore_conflicts=True)
         except Exception:
-            counts["errors"] += 1
-            logger.exception("Error creating recording from row")
+            counts["errors"] += len(records_to_create)
+            logger.exception("bulk_create failed")
+            records_to_create = []
+
+        counts["created"] = len(records_to_create)
+
+        if records_to_create:
+            from .compliance import check_metadata_compliance  # noqa: PLC0415
+            # Re-fetch inserted rows by URL — bulk_create does not reliably set PKs
+            # on SQLite (used in tests); a WHERE IN fetch is still a single query.
+            inserted_urls = [r.recording_url for r in records_to_create]
+            for recording in CallRecording.objects.filter(recording_url__in=inserted_urls):
+                try:
+                    check_metadata_compliance(recording, call_counts_cache=call_counts_cache)
+                except Exception:
+                    logger.exception("Compliance check failed for recording_url=%s", recording.recording_url)
 
     counts["duration_seconds"] = round(time.monotonic() - start_time, 1)
     newrelic.agent.record_custom_event('SyncCompleted', {
