@@ -1,8 +1,8 @@
 # BaySys Call Audit AI — Code Repository Manifest
 
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
-**Last updated:** Session 25 (2026-04-07 — Live production UAT; 12+ hotfixes, GreyLabs pipeline live, OwnLLM scoring designed)
-**Test count:** 317 passing (standalone)
+**Last updated:** Session 25 cont. (2026-04-08 — GreyLabs webhook integration fix; 3 new model fields; migration 0005)
+**Test count:** 320 passing (standalone)
 **Ruff findings:** 0 (standalone) / 58 (crm_apis — auto-fixable)
 **Open issues:** TBD (issues created after push)
 
@@ -71,6 +71,7 @@
 | `agent_sentiment` | CharField(20, null) | From provider |
 | `summary` | TextField(null) | From provider subjective data |
 | `next_actionable` | TextField(null) | From provider subjective data |
+| `default_prompt_response` | TextField(null) | LLM-generated call narrative + audit report from GreyLabs (migration 0005) |
 | `raw_provider_response` | JSONField(null) | Full provider JSON |
 | `created_at` | DateTimeField(auto) | — |
 
@@ -84,7 +85,9 @@
 | `audit_compliance_score` | IntegerField(null) | Score achieved |
 | `max_compliance_score` | IntegerField(null) | Maximum possible |
 | `score_percentage` | DecimalField(5,2, null) | Computed percentage |
-| `category_data` | JSONField(null) | category_data array |
+| `category_data` | JSONField(null) | category_data array from insights |
+| `audit_template_parameters` | JSONField(null) | Per-parameter scores: answer, score, max_score, is_fatal_score, justification (migration 0005) |
+| `function_calling_parameters` | JSONField(null) | Binary feature detection: greeting, closing, dead air, hold time, rate of speech (migration 0005) |
 | `detected_restricted_keyword` | BooleanField(False) | — |
 | `restricted_keywords` | JSONField(default=list) | Detected keywords |
 | `raw_score_payload` | JSONField(null) | Full scoring JSON |
@@ -129,7 +132,7 @@
 | `speech_provider.py` | Provider adapter | `submit_recording()`, `get_results()`, `delete_resource()`, `ask_question()`, `submit_transcript()`, `update_metadata()`, `ProviderError`. Session 25: `data=` → `json=` payload fix, `details[0]` unwrap from GreyLabs response, `customer_id` in submit payload. |
 | `compliance.py` | Config-driven compliance engine | `check_metadata_compliance(recording, call_counts_cache=None)` — cache dict enables O(1) max_calls check (sync path); None falls back to DB query (webhook path). `check_provider_compliance()`, `compute_fatal_level()`, `load_compliance_rules()`, `load_fatal_level_rules()`, `load_gazette_holidays()`, `_sync_content_hash()` (standalone only — auto-updates YAML content hash with warning). All time/date checks use IST via `_IST = ZoneInfo("Asia/Kolkata")`. `lru_cache` on YAML loaders — requires restart to pick up config changes. |
 | `ingestion.py` | Shared ingestion logic | `create_recording_from_row(row, existing_urls=None, call_counts_cache=None)` — `existing_urls` set: O(1) dedup; `call_counts_cache` dict: O(1) max_calls check. Both default to None (CSV/webhook paths use DB fallback). `run_sync_for_date()` — pre-fetches existing URLs (one query) and call counts dict (one annotated query) before loop; uses `fetchall()` to drain cursor before ORM writes (pgbouncer transaction-mode safe); `bulk_create()` for batch inserts (was N individual ORM creates). `validate_row()`, `parse_datetime_flexible()`, `normalize_column_name()`, `_determine_submission_tier()`, `_load_submission_priority()`. SYNC_QUERY filters on `call_start_time`; duration from `SYNC_MIN_CALL_DURATION` (default 20s). Session 25: IST timezone fix (naive `call_start_time` → IST-aware), `bulk_create`, `batch_size` from Django settings. |
-| `services.py` | Business logic | `submit_pending_recordings()`, `process_provider_webhook()`, `run_poll_stuck_recordings()`, `run_own_llm_scoring()` (placeholder — Prompt Q designed), `_normalise_provider_payload(raw, resource_id)` (private), `_create_provider_score()` (private), `_create_transcript()` (private). Session 25: fixed `add_custom_attributes` dict→tuple, batch_size from settings, defensive webhook JSON parse, `details[0]` unwrap, `customer_id` E009 fix. |
+| `services.py` | Business logic | `submit_pending_recordings()`, `process_provider_webhook()`, `run_poll_stuck_recordings()`, `run_own_llm_scoring()` (placeholder — Prompt Q designed), `_normalise_provider_payload(raw, resource_id)` (private), `_create_provider_score()` (private), `_create_transcript()` (private). Session 25: fixed `add_custom_attributes` dict→tuple, batch_size from settings, defensive webhook JSON parse, `details[0]` unwrap, `customer_id` E009 fix. Session 25 cont.: webhook now treated as completion signal — calls `get_results()` after resource_id lookup to fetch full GET Insights response; `poll_stuck_recordings` fixed to unwrap `details[0]` before checking transcript/progress; `_create_provider_score` and `_create_transcript` read 3 new fields. |
 | `serializers.py` | DRF serializers | `CallRecordingListSerializer`, `CallTranscriptSerializer`, `ProviderScoreSerializer`, `ComplianceFlagSerializer`, `OwnLLMScoreSerializer`, `CallDetailSerializer`, `DashboardSummarySerializer` |
 | `views.py` | API views | `ProviderWebhookView`, `RecordingListView`, `RecordingDetailView`, `DashboardSummaryView`, `ComplianceFlagListView`, `RecordingImportView`, `SyncCallLogsView`, `SubmitRecordingsView`, `PollStuckRecordingsView`, `RecordingSignedUrlView`, `FlagReviewView`, `RecordingRetryView`, `SystemStatusView` — helpers: `_build_recording_activity`, `_fire_nr_audit_status_event`, `_AUDIT_ENV_VAR_KEYS`. Session 25: defensive JSON parse for non-JSON webhook Content-Type, batch_size from Django settings (`SYNC_BATCH_SIZE`, `SUBMIT_BATCH_SIZE`, `POLL_BATCH_SIZE`). |
 | `urls.py` | URL patterns | 13 routes under `/audit/<URL_SECRET>/` |

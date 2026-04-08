@@ -309,9 +309,56 @@ ORDER BY created_at DESC;
 ```
 - Reset to pending for retry: `UPDATE call_recordings SET status='pending', retry_count=0 WHERE id=<ID>;`
 
-### GreyLabs webhook payload format (Session 25 — learned from live UAT)
+### GreyLabs webhook payload format (confirmed 2026-04-08 with GreyLabs team)
 
-GreyLabs wraps all webhook data in a `details` array:
+**IMPORTANT — documentation vs reality:**
+The GreyLabs API documentation shows a `details[]`-wrapped format. This is the **GET Insights API** response shape only. The live **webhook** delivers a flat payload:
+
+```json
+{
+  "id": 41040800,
+  "category_data": [...],
+  "subjective_data": [...]
+}
+```
+
+`"id"` is the `resource_id` — confirmed by GreyLabs (Kanishk Gunsola, 2026-04-08). It matches the `provider_resource_id` stored at submission time.
+
+**Webhook architecture (corrected):**
+
+The webhook is treated as a **completion signal only**. When it fires:
+1. Extract `id` from payload
+2. Look up `CallRecording` by `provider_resource_id`
+3. Call `speech_provider.get_results(resource_id)` → returns full GET Insights response with `details[0]`
+4. Extract `details[0]` — contains transcript, durations, sentiments, `audit_template_parameters`, `function_calling_parameters`, `default_prompt_response`, `audit_compliance_score`
+5. Guard on `progress < 100` — skip if not yet complete
+6. Pass full record to `_create_transcript()` and `_create_provider_score()`
+
+**GET Insights response format** (used for both webhook processing and poll recovery):
+
+```json
+{
+  "status": "success",
+  "details": [{
+    "id": 41040800,
+    "transcript": "Speaker 0: ...",
+    "detected_language": "Hindi",
+    "total_call_duration": 121,
+    "audit_compliance_score": 0,
+    "max_compliance_score": 85,
+    "is_fatal": true,
+    "audit_template_parameters": [
+      {"audit_parameter_name": "No harsh language", "answer": "No", "score": 10, "max_score": 10, "is_fatal_score": false, "justification": "..."}
+    ],
+    "function_calling_parameters": {"greeting": {"status": false}, "closing": {"status": true}, ...},
+    "default_prompt_response": "## Call Analysis Report...",
+    "insights": {"category_data": [...], "subjective_data": [...]}
+  }]
+}
+```
+
+**Legacy note:** Commit `cd3ff64` (Session 25) added `details[0]` unwrapping assuming the webhook used this format. Commit `93a2d01` (Session 25 cont.) corrected the architecture — the unwrap still applies but now happens on the GET response, not the webhook payload.
+
 ```json
 {"status": "success", "details": [{"resource_insight_id": "...", "transcript": "...", "category_data": [...]}]}
 ```

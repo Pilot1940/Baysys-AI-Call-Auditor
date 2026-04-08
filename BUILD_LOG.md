@@ -3,7 +3,7 @@
 **Project:** BaySys Call Audit AI
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
 **Build start:** 2026-04-01
-**Last updated:** 2026-04-07 (Session 25)
+**Last updated:** 2026-04-08 (Session 25 cont.)
 **Build method:** Claude Code (Opus 4.6)
 
 ---
@@ -100,6 +100,58 @@ Full review saved to `Documentation/Code-Reviews/code-review-call-auditor-sessio
 7. Poll Stuck recordings after deploy
 
 ### Test count at end of session: 317 passing (standalone), 0 ruff findings (standalone)
+
+---
+
+## Session 25 (cont.) — GreyLabs Webhook Integration Fix
+
+**Date:** 2026-04-08
+**Scope:** Diagnosed and fixed the complete GreyLabs webhook pipeline after live UAT confirmed all webhook callbacks were being silently dropped. Root cause identified via comparison of API documentation vs actual live payload format. Architecture corrected. 3 new model fields added. 320 tests passing.
+
+### Root cause
+
+The webhook handler assumed the live payload matched the GreyLabs documentation format (`{"details": [{id, transcript, scores, ...}]}`). Confirmed from GreyLabs (Kanishk Gunsola) that:
+1. The webhook delivers a **flat notification only**: `{"id": <int>, "category_data": [...], "subjective_data": [...]}`
+2. The `details[]` wrapper format is for the **GET Insights API only** — not webhooks
+3. `"id"` is the `resource_id` — matches `provider_resource_id` stored at submission
+4. Full data (transcript, durations, `audit_template_parameters`, scoring) only available via GET Insights API
+
+Consequence: every webhook callback returned silent 404 — recordings stayed `status=submitted` indefinitely. Poll recovery also broken (checked `transcript` at wrong level in GET response).
+
+### Fixes (commit `93a2d01`)
+
+| # | Change | File |
+|---|--------|------|
+| 1 | `process_provider_webhook()`: webhook treated as completion signal only. After resource_id lookup via `record.get("id")`, calls `speech_provider.get_results()` to fetch full data. Extracts `details[0]`. Guards on `progress < 100`. Passes full record to all downstream helpers. | `services.py` |
+| 2 | `run_poll_stuck_recordings()`: fixed "still processing" check — unwraps `details[0]` before checking `transcript`/`progress`, matching actual GET Insights response shape. | `services.py` |
+| 3 | Added `audit_template_parameters` (JSONField) + `function_calling_parameters` (JSONField) to `ProviderScore`; added `default_prompt_response` (TextField) to `CallTranscript`. Migration `0005`. | `models.py` |
+| 4 | `_create_provider_score()` + `_create_transcript()` read new fields from GET response record. `audit_template_parameters` stores per-parameter Yes/No answers, scores, max scores, justifications from the UVARCL template. | `services.py` |
+
+### New fields now stored per scored call
+
+| Field | Model | Source | Purpose |
+|-------|-------|--------|---------|
+| `audit_template_parameters` | `ProviderScore` | GET response top-level | Per-parameter scores: answer, score, max_score, is_fatal_score, justification |
+| `function_calling_parameters` | `ProviderScore` | GET response top-level | Binary feature detection: greeting, closing, dead air, hold time, rate of speech |
+| `default_prompt_response` | `CallTranscript` | GET response top-level | LLM-generated call narrative and audit report |
+
+### Recovery plan (execute after deploy)
+
+- 2 recordings stuck in `status=submitted` from UAT: recover via `POST /recordings/poll/ {"batch_size": 5}`
+- 100 recordings currently in-flight with GreyLabs: will be processed correctly as webhooks arrive
+- 1000 recordings in `status=pending`: unaffected — not yet submitted
+
+### Pending (unchanged from Session 25)
+
+1. Run Prompt Q (OwnLLM Scoring Backend) — HIGH PRIORITY
+2. Run Prompt R (OwnLLM Score UI) — depends on Q
+3. Apply H-1, H-2, H-3 fixes (idempotency + atomic pipeline)
+4. `ruff check --fix` on crm_apis (58 auto-fixable errors)
+5. Push crm_apis commits from terminal
+6. Re-sync corrected IST timestamps for affected dates
+7. Confirm webhook fix with live UAT results (Harshit to report 2026-04-09)
+
+### Test count: 320 passing (standalone), 0 ruff findings
 
 ---
 
