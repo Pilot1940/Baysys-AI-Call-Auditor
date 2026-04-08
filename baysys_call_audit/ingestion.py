@@ -359,9 +359,10 @@ def create_recording_from_row(
     if recording_dt is None:
         return (None, False)
 
-    # Make timezone-aware if naive
+    # Make timezone-aware if naive — all source times are IST
     if timezone.is_naive(recording_dt):
-        recording_dt = timezone.make_aware(recording_dt)
+        from zoneinfo import ZoneInfo  # noqa: PLC0415
+        recording_dt = timezone.make_aware(recording_dt, ZoneInfo("Asia/Kolkata"))
 
     tier = _determine_submission_tier(row)
 

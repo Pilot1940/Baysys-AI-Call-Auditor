@@ -75,6 +75,8 @@ if _database_url:
 
 STATIC_URL = "/static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+TIME_ZONE = "Asia/Kolkata"
+USE_TZ = True
 
 # CORS — allow React dev server and CRM frontend
 CORS_ALLOWED_ORIGINS = [

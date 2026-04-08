@@ -141,6 +141,18 @@ Consequence: every webhook callback returned silent 404 — recordings stayed `s
 - 100 recordings currently in-flight with GreyLabs: will be processed correctly as webhooks arrive
 - 1000 recordings in `status=pending`: unaffected — not yet submitted
 
+### IST timezone fix — create_recording_from_row() + settings.py
+
+**Commit:** pushed 2026-04-08 (after Session 25 cont.)
+
+Two gaps missed in the Session 25 IST hotfix:
+
+1. `create_recording_from_row()` in `ingestion.py` — `make_aware()` was called without specifying `ZoneInfo("Asia/Kolkata")`. Django fell back to `settings.TIME_ZONE` (default `'America/Chicago'`) — 10.5 hours off from IST. Fixed to match `run_sync_for_date()` pattern.
+
+2. `settings.py` — no `TIME_ZONE` or `USE_TZ` defined. Added `TIME_ZONE = "Asia/Kolkata"` and `USE_TZ = True` explicitly.
+
+**Data fix pending:** Harshit to run check query on prod DB to confirm scope and magnitude of existing wrong-timezone records, then PC to confirm offset before UPDATE is run.
+
 ### Pending (unchanged from Session 25)
 
 1. Run Prompt Q (OwnLLM Scoring Backend) — HIGH PRIORITY

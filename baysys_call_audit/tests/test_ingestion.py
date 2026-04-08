@@ -1,5 +1,6 @@
 """Tests for baysys_call_audit.ingestion — shared ingestion logic."""
 from datetime import datetime, timezone as dt_tz
+from zoneinfo import ZoneInfo
 
 from django.test import TestCase
 
@@ -183,11 +184,14 @@ class CreateRecordingFromRowTests(TestCase):
         self.assertTrue(created)
         self.assertIsNotNone(recording.recording_datetime.tzinfo)
 
-    def test_naive_datetime_made_aware(self):
+    def test_naive_datetime_made_aware_as_ist(self):
+        # Naive datetime must be treated as IST, not Django's default TIME_ZONE.
         row = _valid_row(recording_datetime="2026-03-30T10:00:00")
         recording, created = create_recording_from_row(row)
         self.assertTrue(created)
-        self.assertIsNotNone(recording.recording_datetime.tzinfo)
+        ist = ZoneInfo("Asia/Kolkata")
+        aware_in_ist = datetime(2026, 3, 30, 10, 0, 0, tzinfo=ist)
+        self.assertEqual(recording.recording_datetime, aware_in_ist)
 
     def test_datetime_object_passthrough(self):
         dt = datetime(2026, 3, 30, 10, 0, 0, tzinfo=dt_tz.utc)
