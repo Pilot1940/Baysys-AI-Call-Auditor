@@ -3,7 +3,7 @@
 **Project:** BaySys Call Audit AI
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
 **Build start:** 2026-04-01
-**Last updated:** 2026-04-07 (Session 14)
+**Last updated:** 2026-04-07 (Session 25)
 **Build method:** Claude Code (Opus 4.6)
 
 ---
@@ -28,6 +28,78 @@
 | **M** | **Phase 1 UI backend: signed-url, flag review, retry + dashboard extended** | **2026-04-07** | — |
 | **N** | **CRM React embed: call-audit-frontend-embed branch in crm repo** | **2026-04-07** | — |
 | **P** | **crm_apis sync: Prompt M views + serializer + urls + tests → arc/baysys_call_audit** | **2026-04-07** | — |
+| **Session 25** | **Live production UAT: 12+ hotfixes, GreyLabs pipeline operational** | **2026-04-07** | — |
+| **Q** | **OwnLLM Scoring Backend (designed, not yet executed)** | **2026-04-07** | — |
+| **R** | **OwnLLM Score UI swap (designed, not yet executed)** | **2026-04-07** | — |
+
+---
+
+## Session 25 — Live Production UAT
+
+**Date:** 2026-04-07
+**Scope:** First live production UAT with GreyLabs webhooks processing real calls. 12+ hotfixes discovered and committed during live testing. OwnLLM scoring architecture designed (Prompts Q + R written to disk). Deep code review completed.
+
+### Production hotfixes (all committed to standalone + crm_apis `call-auditor` branch)
+
+| # | Fix | File(s) | Root cause |
+|---|-----|---------|------------|
+| 1 | axios timeout 60s + sync date picker | `auditAxios.ts`, `AuditDashboardPage.tsx` | UI timeout too short for sync |
+| 2 | batch_size silently ignored after pgbouncer fix | `ingestion.py` | batch_size param not threaded through |
+| 3 | bulk_create (was N individual ORM creates) | `ingestion.py` | Slow inserts over pooler connection |
+| 4 | IST timezone fix (naive call_start_time → IST-aware) | `ingestion.py` | `make_aware()` defaulted to UTC |
+| 5 | GreyLabs: `data=` → `json=` in submit_recording | `speech_provider.py` | Wrong requests param → empty body |
+| 6 | GreyLabs: E009 missing customer_id | `services.py`, `speech_provider.py` | Required field not in submission payload |
+| 7 | Webhook: defensive JSON parse (non-JSON Content-Type) | `views.py` | GreyLabs webhook sent non-standard Content-Type |
+| 8 | Webhook: unwrap `details[0]` from GreyLabs payload | `services.py`, `speech_provider.py` | Payload nested in `{"details":[{...}]}` |
+| 9 | SYNC/SUBMIT/POLL_BATCH_SIZE from Django settings | `services.py`, `views.py`, `.env.example` | Hardcoded batch sizes |
+| 10 | `compliance_rules.yaml` content_hash auto-sync | `compliance.py` | Hash mismatch on config edit |
+| 11 | `add_custom_attributes`: dict → list of tuples | `services.py` | NR API requires `[(name, value)]`, not `{name: value}` — caused ValueError on every webhook |
+| 12 | UI: STATUS_LABEL map, phone masking, evidence fmt, dry-run toggle | `AuditDashboardPage.tsx`, `AuditCallDetailPage.tsx` | UI polish for production readiness |
+
+### Architecture decision: OwnLLM Scoring (Option C)
+
+**Problem:** GreyLabs returns its own internal score (e.g. 100% for Wrong Party Connect calls) which does not correspond to the UVARCL 19-parameter scorecard. Their `category_data` field is structured differently than expected (`insights` nesting vs root level). Showing GreyLabs' score as "Compliance Score" is misleading.
+
+**Decision:** Implement own LLM scoring (`run_own_llm_scoring()`) using Anthropic API + UVARCL scorecard. GreyLabs provides transcription + analytics; our LLM scores against the 19-parameter rubric. `OwnLLMScore` becomes primary compliance score; `ProviderScore` demoted to "GreyLabs Analytics" collapsible section.
+
+**Prompts designed:**
+- `docs/prompts/prompt-Q-own-llm-scoring.md` — Backend: scoring YAML, Anthropic API integration, services.py, compliance.py handler, tests
+- `docs/prompts/prompt-R-own-llm-score-ui.md` — Frontend: `LLMScoreSection` component, score ring, parameter breakdown, GreyLabs collapsible
+
+**New env vars (for Prompt Q):**
+- `OWN_LLM_ENABLED=true`
+- `OWN_LLM_API_KEY=<anthropic-key>`
+- `OWN_LLM_MODEL=claude-haiku-4-5-20251001`
+- `OWN_LLM_SCORING_TEMPLATE=scoring_template_uvarcl_v2`
+
+### Code review (session 25)
+
+Full review saved to `Documentation/Code-Reviews/code-review-call-auditor-session25-2026-04-07.md`.
+
+- **0 CRITICAL / 8 HIGH / 9 MEDIUM / 4 MINOR**
+- Top concerns: webhook retry idempotency (H-1, H-2), non-atomic webhook pipeline (H-3), `category_data` extraction from wrong location (H-4)
+- Build rules compliance: 8/10 (violated: Rule 3 crm_apis ruff, Rule 10 docs freshness)
+- All fixes have Claude Code prompts ready in the review report
+
+### Key learnings from live UAT
+
+1. **GreyLabs webhook payload:** `{"status":"success","details":[{...}]}` — data always nested in `details[0]`. Not documented in their API reference.
+2. **GreyLabs `category_data`:** List at root level, NOT nested in `insights`. Code was reading from wrong location → stored as None.
+3. **`newrelic.agent.add_custom_attributes()`:** Requires list of tuples `[(name, value)]`, NOT a dict. Dict iteration yields keys as strings → `ValueError: too many values to unpack (expected 2)`.
+4. **pgbouncer transaction mode:** `cursor.fetchall()` must complete before any ORM write on the same connection, otherwise the cursor becomes invalid.
+5. **GreyLabs score ≠ UVARCL compliance score:** Their template score is an internal metric. Must score independently against our 19-parameter rubric.
+
+### Pending (must do next session, in order)
+
+1. Run Prompt Q (OwnLLM Scoring Backend) — HIGH PRIORITY
+2. Run Prompt R (OwnLLM Score UI) — depends on Q
+3. Apply H-1, H-2, H-3 fixes (idempotency + atomic pipeline)
+4. `ruff check --fix` on crm_apis (58 auto-fixable errors)
+5. Push crm_apis commits from terminal (SSH blocked in sandbox)
+6. Re-sync corrected IST timestamps for affected dates
+7. Poll Stuck recordings after deploy
+
+### Test count at end of session: 317 passing (standalone), 0 ruff findings (standalone)
 
 ---
 

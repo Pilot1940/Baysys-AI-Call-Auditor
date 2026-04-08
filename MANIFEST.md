@@ -1,9 +1,9 @@
 # BaySys Call Audit AI — Code Repository Manifest
 
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
-**Last updated:** Session 14 (Prompt P — crm_apis fully synced; PR call-auditor → master unblocked)
-**Test count:** 317 passing
-**Ruff findings:** 0
+**Last updated:** Session 25 (2026-04-07 — Live production UAT; 12+ hotfixes, GreyLabs pipeline live, OwnLLM scoring designed)
+**Test count:** 317 passing (standalone)
+**Ruff findings:** 0 (standalone) / 58 (crm_apis — auto-fixable)
 **Open issues:** TBD (issues created after push)
 
 ---
@@ -17,7 +17,7 @@
 | `settings_test.py` | Test override — SQLite in-memory |
 | `urls.py` | Root URL config: `admin/` + `audit/` (includes app urls) |
 | `requirements.txt` | Python deps: Django, DRF, django-cors-headers, psycopg2-binary, dj-database-url, requests, python-decouple, openpyxl, pyyaml, newrelic, ruff |
-| `.env.example` | Template for environment variables — includes `AUDIT_URL_SECRET` (secret URL prefix for all audit endpoints) |
+| `.env.example` | Template for environment variables — includes `AUDIT_URL_SECRET`, `AUDIT_STATUS_SECRET`, batch size settings (`SYNC_BATCH_SIZE`, `SUBMIT_BATCH_SIZE`, `POLL_BATCH_SIZE`), OwnLLM settings (`OWN_LLM_ENABLED`, `OWN_LLM_API_KEY`, `OWN_LLM_MODEL`, `OWN_LLM_SCORING_TEMPLATE`), New Relic, GreyLabs webhook IP allowlist |
 | `.gitignore` | Standard Python/Node/Django ignores |
 | `newrelic.ini.example` | New Relic APM config template (no secrets; committed to git) |
 | `CLAUDE.md` | Build rules for Claude Code sessions |
@@ -105,7 +105,7 @@
 | `reviewed_at` | DateTimeField(null) | — |
 | `created_at` | DateTimeField(auto) | — |
 
-#### `OwnLLMScore` — Custom LLM scoring (placeholder)
+#### `OwnLLMScore` — Custom LLM scoring (schema ready; implementation in Prompt Q)
 | Field | Type | Purpose |
 |-------|------|---------|
 | `id` | AutoField PK | — |
@@ -126,12 +126,12 @@
 | `admin.py` | Django admin registrations | All 5 models registered with list_display, filters, search |
 | `auth.py` | Authentication + RBAC | `MockUser`, `MockCrmAuth`, `get_auth_backend()`, `AuditPermissionMixin` |
 | `crm_adapter.py` | CRM mock/prod seam | `get_auth_backend_name()`, `get_user_portfolio()`, `get_team_users()`, `get_user_agency_id()`, `get_agency_list()`, `get_user_names()`, `get_signed_url()` |
-| `speech_provider.py` | Provider adapter | `submit_recording()`, `get_results()`, `delete_resource()`, `ask_question()`, `submit_transcript()`, `update_metadata()`, `ProviderError` |
-| `compliance.py` | Config-driven compliance engine | `check_metadata_compliance(recording, call_counts_cache=None)` — cache dict enables O(1) max_calls check (sync path); None falls back to DB query (webhook path). `check_provider_compliance()`, `compute_fatal_level()`, `load_compliance_rules()`, `load_fatal_level_rules()`, `load_gazette_holidays()`. All time/date checks use IST via `_IST = ZoneInfo("Asia/Kolkata")`. |
-| `ingestion.py` | Shared ingestion logic | `create_recording_from_row(row, existing_urls=None, call_counts_cache=None)` — `existing_urls` set: O(1) dedup; `call_counts_cache` dict: O(1) max_calls check. Both default to None (CSV/webhook paths use DB fallback). `run_sync_for_date()` — pre-fetches existing URLs (one query) and call counts dict (one annotated query) before loop; uses `fetchall()` to drain cursor before ORM writes (pgbouncer transaction-mode safe). `validate_row()`, `parse_datetime_flexible()`, `normalize_column_name()`, `_determine_submission_tier()`, `_load_submission_priority()`. SYNC_QUERY filters on `call_start_time`; duration from `SYNC_MIN_CALL_DURATION` (default 20s). |
-| `services.py` | Business logic | `submit_pending_recordings()`, `process_provider_webhook()`, `run_poll_stuck_recordings()`, `run_own_llm_scoring()` (placeholder), `_normalise_provider_payload(raw, resource_id)` (private — ensures resource_insight_id present in poll responses) |
+| `speech_provider.py` | Provider adapter | `submit_recording()`, `get_results()`, `delete_resource()`, `ask_question()`, `submit_transcript()`, `update_metadata()`, `ProviderError`. Session 25: `data=` → `json=` payload fix, `details[0]` unwrap from GreyLabs response, `customer_id` in submit payload. |
+| `compliance.py` | Config-driven compliance engine | `check_metadata_compliance(recording, call_counts_cache=None)` — cache dict enables O(1) max_calls check (sync path); None falls back to DB query (webhook path). `check_provider_compliance()`, `compute_fatal_level()`, `load_compliance_rules()`, `load_fatal_level_rules()`, `load_gazette_holidays()`, `_sync_content_hash()` (standalone only — auto-updates YAML content hash with warning). All time/date checks use IST via `_IST = ZoneInfo("Asia/Kolkata")`. `lru_cache` on YAML loaders — requires restart to pick up config changes. |
+| `ingestion.py` | Shared ingestion logic | `create_recording_from_row(row, existing_urls=None, call_counts_cache=None)` — `existing_urls` set: O(1) dedup; `call_counts_cache` dict: O(1) max_calls check. Both default to None (CSV/webhook paths use DB fallback). `run_sync_for_date()` — pre-fetches existing URLs (one query) and call counts dict (one annotated query) before loop; uses `fetchall()` to drain cursor before ORM writes (pgbouncer transaction-mode safe); `bulk_create()` for batch inserts (was N individual ORM creates). `validate_row()`, `parse_datetime_flexible()`, `normalize_column_name()`, `_determine_submission_tier()`, `_load_submission_priority()`. SYNC_QUERY filters on `call_start_time`; duration from `SYNC_MIN_CALL_DURATION` (default 20s). Session 25: IST timezone fix (naive `call_start_time` → IST-aware), `bulk_create`, `batch_size` from Django settings. |
+| `services.py` | Business logic | `submit_pending_recordings()`, `process_provider_webhook()`, `run_poll_stuck_recordings()`, `run_own_llm_scoring()` (placeholder — Prompt Q designed), `_normalise_provider_payload(raw, resource_id)` (private), `_create_provider_score()` (private), `_create_transcript()` (private). Session 25: fixed `add_custom_attributes` dict→tuple, batch_size from settings, defensive webhook JSON parse, `details[0]` unwrap, `customer_id` E009 fix. |
 | `serializers.py` | DRF serializers | `CallRecordingListSerializer`, `CallTranscriptSerializer`, `ProviderScoreSerializer`, `ComplianceFlagSerializer`, `OwnLLMScoreSerializer`, `CallDetailSerializer`, `DashboardSummarySerializer` |
-| `views.py` | API views | `ProviderWebhookView`, `RecordingListView`, `RecordingDetailView`, `DashboardSummaryView`, `ComplianceFlagListView`, `RecordingImportView`, `SyncCallLogsView`, `SubmitRecordingsView`, `PollStuckRecordingsView`, `RecordingSignedUrlView`, `FlagReviewView`, `RecordingRetryView`, `SystemStatusView` — helpers: `_build_recording_activity`, `_fire_nr_audit_status_event`, `_AUDIT_ENV_VAR_KEYS` |
+| `views.py` | API views | `ProviderWebhookView`, `RecordingListView`, `RecordingDetailView`, `DashboardSummaryView`, `ComplianceFlagListView`, `RecordingImportView`, `SyncCallLogsView`, `SubmitRecordingsView`, `PollStuckRecordingsView`, `RecordingSignedUrlView`, `FlagReviewView`, `RecordingRetryView`, `SystemStatusView` — helpers: `_build_recording_activity`, `_fire_nr_audit_status_event`, `_AUDIT_ENV_VAR_KEYS`. Session 25: defensive JSON parse for non-JSON webhook Content-Type, batch_size from Django settings (`SYNC_BATCH_SIZE`, `SUBMIT_BATCH_SIZE`, `POLL_BATCH_SIZE`). |
 | `urls.py` | URL patterns | 13 routes under `/audit/<URL_SECRET>/` |
 
 ### Management commands (`management/commands/`)
@@ -212,6 +212,8 @@
 | `SCORECARD.md` | Canonical scoring rubric (19 params, 7 FATALs) |
 | `new-relic-telemetry-plan.md` | New Relic phased implementation plan (4 phases) |
 | `prompts/prompt-H-new-relic.md` | Claude Code prompt spec for New Relic instrumentation (Prompt H executed — complete) |
+| `prompts/prompt-Q-own-llm-scoring.md` | Claude Code prompt spec for OwnLLM scoring backend (pending execution) |
+| `prompts/prompt-R-own-llm-score-ui.md` | Claude Code prompt spec for OwnLLM score UI swap (pending, depends on Q) |
 | `speech-provider/api-reference.md` | Current provider (GreyLabs) API documentation |
 | `testing/test-guide.md` | Test execution guide |
 
@@ -222,3 +224,29 @@
 | # | Title | Status |
 |---|-------|--------|
 | TBD | Prompt A: Project scaffold | To be created after push |
+
+---
+
+## Code Reviews (NOT in git — in parent `BaySys-Voice/Documentation/Code-Reviews/`)
+
+| File | Purpose |
+|------|---------|
+| `code-review-call-auditor-session25-2026-04-07.md` | Session 25 deep review: 0 CRITICAL, 8 HIGH, 9 MEDIUM, 4 MINOR |
+| `code-review-call-auditor-deep-scan-2026-04-07.md` | Session 25 early scan |
+| `code-review-call-auditor-2026-04-07.md` | Session 14 review |
+
+---
+
+## Session 25 — Known Issues (pending fixes)
+
+| ID | Severity | Summary | Fix location |
+|----|----------|---------|-------------|
+| H-1 | HIGH | Duplicate `ProviderScore` on webhook retry — needs `update_or_create` | `services.py:_create_provider_score()` |
+| H-2 | HIGH | Duplicate `ComplianceFlag` on retry — needs unique constraint + `get_or_create` | `compliance.py` + migration |
+| H-3 | HIGH | `process_provider_webhook()` not wrapped in `transaction.atomic()` | `services.py` |
+| H-4 | HIGH | `_create_provider_score()` reads `category_data` from `insights` (empty) — should read root | `services.py` (fix in Prompt Q) |
+| H-5 | HIGH | crm_apis `compliance.py` missing `_sync_content_hash()` | crm_apis mirror after Prompt Q |
+| H-6 | HIGH | crm_apis has 58 ruff errors from file mirror | `ruff check --fix` on crm_apis |
+| H-7 | HIGH | Timezone inconsistency: sync path explicit IST vs import path defaulting to UTC | `ingestion.py` |
+| M-1 | MEDIUM | Batch size user input not validated in views | `views.py` |
+| M-2 | MEDIUM | `fetchall()` defeats batch_size memory protection | `ingestion.py` |

@@ -309,6 +309,35 @@ ORDER BY created_at DESC;
 ```
 - Reset to pending for retry: `UPDATE call_recordings SET status='pending', retry_count=0 WHERE id=<ID>;`
 
+### GreyLabs webhook payload format (Session 25 — learned from live UAT)
+
+GreyLabs wraps all webhook data in a `details` array:
+```json
+{"status": "success", "details": [{"resource_insight_id": "...", "transcript": "...", "category_data": [...]}]}
+```
+
+**Key facts discovered during live testing:**
+- Data is always in `details[0]` — the code unwraps this in `process_provider_webhook()`
+- `category_data` is a **list at root level** (not nested inside `insights`). Code that reads `payload.get("insights", {}).get("category_data")` gets None.
+- Submission requires `json=payload` (not `data=payload`) — otherwise GreyLabs receives an empty body
+- `customer_id` must be included in the submission payload (GreyLabs error E009 otherwise)
+- Webhook Content-Type may not be `application/json` — defensive JSON parse handles this
+
+### NewRelic `add_custom_attributes` format
+
+The NR API requires a **list of tuples**, NOT a dict:
+```python
+# WRONG — causes ValueError: too many values to unpack
+newrelic.agent.add_custom_attributes({'key': 'value'})
+
+# CORRECT
+newrelic.agent.add_custom_attributes([('key', 'value')])
+```
+
+### Config YAML changes require restart
+
+`compliance_rules.yaml` and `fatal_level_rules.yaml` are loaded with `@lru_cache`. Changes to these files are not picked up without restarting Django. This is a known trade-off (documented in code review H-6 / M-6).
+
 ---
 
 ## Cron Setup
@@ -369,6 +398,14 @@ All cron jobs run from the project root with the virtualenv activated. Replace `
 | `COMPLIANCE_FATAL_THRESHOLD` | No | 3 | Fatal level threshold for compliance flag |
 | `SYNC_MIN_CALL_DURATION` | No | 20 | Minimum call duration (seconds) to sync; shorter calls excluded |
 | `POLL_STUCK_AFTER_MINUTES` | No | 30 | Minutes after submission before polling for missed webhooks |
+| `SYNC_BATCH_SIZE` | No | 5000 | Max rows to sync from `call_logs` per run |
+| `SUBMIT_BATCH_SIZE` | No | 100 | Max recordings to submit to provider per run |
+| `POLL_BATCH_SIZE` | No | 50 | Max stuck recordings to poll per run |
+| `SPEECH_PROVIDER_WEBHOOK_ALLOWED_IPS` | No | — | Comma-separated IP allowlist for webhook endpoint (X-Forwarded-For extraction) |
+| `OWN_LLM_ENABLED` | No | false | Enable own LLM scoring (Anthropic API) |
+| `OWN_LLM_API_KEY` | Cond. | — | Anthropic API key (required if `OWN_LLM_ENABLED=true`) |
+| `OWN_LLM_MODEL` | No | claude-haiku-4-5-20251001 | LLM model for scoring |
+| `OWN_LLM_SCORING_TEMPLATE` | No | scoring_template_uvarcl_v2 | Scoring template name (matches `config/*.yaml`) |
 
 ---
 
@@ -469,6 +506,33 @@ NEW_RELIC_CONFIG_FILE=newrelic.ini newrelic-admin run-program python manage.py p
 When moving to K8s: drop `newrelic.ini`, use env vars exclusively via ConfigMap (non-secret) + Secret (licence key). The agent respects env vars natively.
 
 Full plan: `docs/new-relic-telemetry-plan.md`
+
+---
+
+## OwnLLM Scoring (Pending — Prompt Q)
+
+Own LLM scoring uses the Anthropic API to score call transcripts against the UVARCL 19-parameter scorecard. This replaces GreyLabs' internal score as the primary compliance metric.
+
+**Status:** Architecture designed, prompts written (`docs/prompts/prompt-Q-own-llm-scoring.md`, `docs/prompts/prompt-R-own-llm-score-ui.md`). Not yet implemented.
+
+**How it will work:**
+1. After `process_provider_webhook()` stores the transcript, `run_own_llm_scoring()` is called
+2. Transcript + scoring YAML template sent to Anthropic API (Claude Haiku)
+3. Response parsed into `OwnLLMScore` record with per-parameter breakdown
+4. `OwnLLMScore` displayed as primary "Compliance Score" in UI
+5. `ProviderScore` (GreyLabs) demoted to collapsible "GreyLabs Analytics" section
+
+**Env vars required on production:**
+```bash
+OWN_LLM_ENABLED=true
+OWN_LLM_API_KEY=<anthropic-api-key>
+OWN_LLM_MODEL=claude-haiku-4-5-20251001
+OWN_LLM_SCORING_TEMPLATE=scoring_template_uvarcl_v2
+```
+
+**Scoring template:** `config/scoring_template_uvarcl_v2.yaml` (created by Prompt Q)
+
+**Not-scoreable calls:** WPC (Wrong Party Connect), voicemail, no-answer calls are classified as `call_type: not_scoreable` with a disposition label. They receive no numeric score.
 
 ---
 

@@ -1,0 +1,177 @@
+# UVARCL Collections Call Quality Scorecard v2
+# Used by run_own_llm_scoring() to score calls against this template.
+template_name: "UVARCL Collections Call Quality v2"
+version: "2.0"
+max_total_score: 100
+
+# Calls with these GreyLabs dispositions are not scoreable — store call_type=not_scoreable
+not_scoreable_dispositions:
+  - "Wrong Party Connect"
+  - "No Answer"
+  - "Voicemail"
+  - "Switched Off"
+  - "Not Connected"
+
+parameters:
+  - id: 1
+    name: "Greeting"
+    group: "Introduction Quality"
+    max_score: 3
+    fatal: false
+    type: objective
+    prompt: "Did the call open with a greeting (e.g. Good morning/afternoon/evening/namaste)? Score: 3=Yes, 0=No"
+
+  - id: 2
+    name: "Self-introduction (Name)"
+    group: "Introduction Quality"
+    max_score: 3
+    fatal: false
+    type: objective
+    prompt: "Did the agent state their own name at any point? Score: 3=Stated, 0=Not stated"
+
+  - id: 3
+    name: "Bank / Original Lender context disclosed"
+    group: "Introduction Quality"
+    max_score: 3
+    fatal: false
+    type: objective
+    prompt: "Did the agent mention the original bank or NBFC name? Score: 3=Yes, 0=No"
+
+  - id: 4
+    name: "UVARCL takeover / ARC identity disclosed"
+    group: "Introduction Quality"
+    max_score: 6
+    fatal: false
+    type: objective
+    prompt: "Did the agent identify UVARCL as the current debt owner? Score: 6=Clear mention, 3=Partial/implied, 0=Not mentioned"
+
+  - id: 5
+    name: "Right Party Verification (RPV)"
+    group: "Introduction Quality"
+    max_score: 5
+    fatal: true
+    fatal_condition: "Debt details were discussed without verifying the identity of the person on the call"
+    type: objective
+    prompt: "FATAL if debt details were discussed without RPV. Did agent verify identity before discussing account? Score: 5=RPV done before any account discussion, 0=FATAL (discussed debt without RPV)"
+
+  - id: 6
+    name: "No fumble / fluent delivery"
+    group: "Call Quality"
+    max_score: 5
+    fatal: false
+    type: subjective
+    prompt: "Assess agent fluency and confidence. Score: 5=Excellent (clear, confident, no hesitation), 3=Minor issues (occasional fumble), 0=Significant fumble (confusing, repetitive, incoherent)"
+
+  - id: 7
+    name: "No harsh / threatening / abusive language"
+    group: "Call Quality"
+    max_score: 10
+    fatal: true
+    fatal_condition: "Agent used any threatening, abusive, or coercive language"
+    type: objective
+    prompt: "FATAL if any threat or abuse by agent. Score: 10=None detected, 0=FATAL (any threat, abuse, or coercive language)"
+
+  - id: 8
+    name: "Objection handling / answered questions"
+    group: "Call Quality"
+    max_score: 8
+    fatal: false
+    type: objective
+    prompt: "Did agent address customer questions and objections? Score: 8=All answered satisfactorily, 4=>50% answered, 0=<50% answered or ignored"
+
+  - id: 9
+    name: "Customer satisfied / de-escalated"
+    group: "Call Quality"
+    max_score: 5
+    fatal: false
+    type: subjective
+    prompt: |
+      Assess customer sentiment at end vs start. Score:
+      5=De-escalated/satisfied (commitment signals: 'okay I will pay', 'theek hai', 'send me UPI', 'kal tak kar deta hoon'; or acceptance: 'samajh gaya', 'noted', 'chalega')
+      2=Neutral (deflection: 'baad mein', 'abhi nahi', 'mujhe time chahiye'; passive non-engagement)
+      0=Escalated (threats: 'RBI mein jaaunga', 'consumer court'; abuse; customer angrier at end than start)
+
+  - id: 10
+    name: "Moved forward — PTP / next step secured"
+    group: "Call Quality"
+    max_score: 10
+    fatal: false
+    type: objective
+    prompt: "Was a Promise-to-Pay or clear next action agreed? Score: 10=PTP with date/amount secured, 5=Next step agreed (callback, document, verification), 0=No movement"
+
+  - id: 11
+    name: "Closing remark and summary"
+    group: "Call Quality"
+    max_score: 4
+    fatal: false
+    type: objective
+    prompt: "Did agent close with a thank-you and recap of next steps? Score: 4=Both done, 2=One done, 0=Neither"
+
+  - id: 12
+    name: "Regulatory concern"
+    group: "Call Quality"
+    max_score: 3
+    fatal: false
+    type: subjective
+    prompt: "If customer raised a regulatory concern (RBI, harassment, complaint) — was it handled correctly? Score: 3=Handled correctly or not raised (N/A), 1=Partial handling, 0=Ignored or mishandled"
+
+  - id: 13
+    name: "Calling within permitted hours (8am–8pm IST)"
+    group: "Compliance & RBI"
+    max_score: 8
+    fatal: true
+    fatal_condition: "Evidence the call was placed outside 08:00–20:00 IST"
+    type: objective
+    prompt: "FATAL if call is outside permitted hours. Score: 8=Within window or cannot determine from transcript, 0=FATAL (transcript evidence of call outside hours)"
+
+  - id: 14
+    name: "Non-disclosure to third parties (TCP)"
+    group: "Compliance & RBI"
+    max_score: 5
+    fatal: true
+    fatal_condition: "Loan or account details shared with a third party without customer consent"
+    type: objective
+    prompt: "FATAL if loan details shared with unverified third party. Score: 5=Maintained confidentiality, 0=FATAL (details shared without consent)"
+
+  - id: 15
+    name: "Misrepresentation"
+    group: "Compliance & RBI"
+    max_score: 5
+    fatal: true
+    fatal_condition: "Agent claimed to be from the original bank/lender instead of UVARCL"
+    type: objective
+    prompt: "FATAL if agent misrepresented as original lender. Score: 5=Correctly identified as UVARCL, 3=Nothing mentioned (neutral), 0=FATAL (claimed to be from original bank)"
+
+  - id: 16
+    name: "Non-payment consequences communicated"
+    group: "Compliance & RBI"
+    max_score: 7
+    fatal: false
+    type: objective
+    prompt: "Were legal or credit-bureau consequences of non-payment explained? Score: 7=Clearly explained, 3=Vaguely mentioned, 0=Not mentioned"
+
+  - id: 17
+    name: "Confirmed NO OTP / PIN requested"
+    group: "Scam & Trust Handling"
+    max_score: 4
+    fatal: true
+    fatal_condition: "Agent requested OTP, CVV, password, or PIN"
+    type: objective
+    prompt: "FATAL if agent asked for OTP/CVV/PIN/password. Score: 4=Not requested, 0=FATAL"
+
+  - id: 18
+    name: "Shared Personal Details for Payment"
+    group: "Scam & Trust Handling"
+    max_score: 4
+    fatal: true
+    fatal_condition: "Agent shared their personal phone number or UPI ID to collect payment"
+    type: objective
+    prompt: "FATAL if agent shared personal payment details. Score: 4=Not shared, 0=FATAL (agent gave personal number or UPI for payment)"
+
+  - id: 19
+    name: "Verification / dispute channel offered"
+    group: "Scam & Trust Handling"
+    max_score: 2
+    fatal: false
+    type: objective
+    prompt: "Did agent mention official dispute or verification process? Score: 2=Yes, 0=No"
