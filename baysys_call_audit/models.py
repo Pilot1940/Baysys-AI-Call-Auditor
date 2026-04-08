@@ -78,6 +78,7 @@ class CallTranscript(models.Model):
     agent_sentiment = models.CharField(max_length=20, null=True, blank=True)
     summary = models.TextField(null=True, blank=True)
     next_actionable = models.TextField(null=True, blank=True)
+    default_prompt_response = models.TextField(null=True, blank=True)
     raw_provider_response = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -105,6 +106,8 @@ class ProviderScore(models.Model):
     max_compliance_score = models.IntegerField(null=True, blank=True)
     score_percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     category_data = models.JSONField(null=True, blank=True)
+    audit_template_parameters = models.JSONField(null=True, blank=True)
+    function_calling_parameters = models.JSONField(null=True, blank=True)
     detected_restricted_keyword = models.BooleanField(default=False)
     restricted_keywords = models.JSONField(default=list)
     raw_score_payload = models.JSONField(null=True, blank=True)

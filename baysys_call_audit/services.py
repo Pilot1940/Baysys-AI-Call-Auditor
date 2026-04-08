@@ -168,17 +168,27 @@ def process_provider_webhook(payload: dict) -> CallRecording | None:
         newrelic.agent.record_custom_metric('Custom/Pipeline/Webhooks/IdempotencySkip', 1)
         return recording
 
+    # Fetch full results from provider — webhook payload is a notification only
+    full_results = speech_provider.get_results(str(resource_id))
+    full_details = full_results.get("details", [])
+    full_record = full_details[0] if full_details else full_results
+    if full_record.get("progress", 100) < 100:
+        logger.warning(
+            "Recording %s not yet complete (progress=%s%%)", recording.pk, full_record.get("progress")
+        )
+        return recording
+
     # Create transcript
-    _create_transcript(recording, record)
+    _create_transcript(recording, full_record)
 
     # Create provider scores
-    score = _create_provider_score(recording, record)
+    score = _create_provider_score(recording, full_record)
 
     # Compute fatal level from provider boolean scores
     compute_fatal_level(recording, score)
 
     # Run provider compliance rules (config-driven)
-    check_provider_compliance(recording, record)
+    check_provider_compliance(recording, full_record)
 
     # Mark complete
     recording.status = "completed"
@@ -211,6 +221,7 @@ def _create_transcript(recording: CallRecording, payload: dict) -> CallTranscrip
             "agent_sentiment": payload.get("agent_sentiment"),
             "summary": summary,
             "next_actionable": next_actionable,
+            "default_prompt_response": payload.get("default_prompt_response"),
             "raw_provider_response": payload,
         },
     )
@@ -228,9 +239,12 @@ def _create_provider_score(recording: CallRecording, payload: dict) -> ProviderS
     score = ProviderScore(
         recording=recording,
         template_id=template_id,
+        template_name=payload.get("template_name"),
         audit_compliance_score=payload.get("audit_compliance_score"),
         max_compliance_score=payload.get("max_compliance_score"),
         category_data=insights.get("category_data"),
+        audit_template_parameters=payload.get("audit_template_parameters"),
+        function_calling_parameters=payload.get("function_calling_parameters"),
         detected_restricted_keyword=payload.get("detected_restricted_keyword", False),
         restricted_keywords=payload.get("restricted_keywords", []),
         raw_score_payload=insights,
@@ -313,8 +327,12 @@ def run_poll_stuck_recordings(
         try:
             poll_result = speech_provider.get_results(recording.provider_resource_id)
 
-            # "Still processing" — absent transcript means results not ready yet
-            if not poll_result.get("transcript"):
+            # Unwrap details array — GET Insights API wraps results in details[0]
+            poll_details = poll_result.get("details", [])
+            poll_record = poll_details[0] if poll_details else poll_result
+
+            # "Still processing" — no transcript and progress < 100 means results not ready yet
+            if not poll_record.get("transcript") and poll_record.get("progress", 0) < 100:
                 result["still_processing"] += 1
                 continue
 

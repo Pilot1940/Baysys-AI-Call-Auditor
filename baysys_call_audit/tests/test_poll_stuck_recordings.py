@@ -165,3 +165,20 @@ class PollStuckRecordingsRecoveryTests(TestCase):
         _run_command(batch_size=2)
 
         self.assertEqual(mock_provider.get_results.call_count, 2)
+
+    @override_settings(POLL_STUCK_AFTER_MINUTES=30)
+    @patch("baysys_call_audit.services.speech_provider")
+    def test_progress_below_100_counted_as_still_processing(self, mock_provider):
+        """GET response with details[0].progress < 100 is treated as still processing."""
+        _make_submitted_recording()
+        mock_provider.ProviderError = Exception
+        # GET Insights API wraps result in details array; progress=50 means not done
+        mock_provider.get_results.return_value = {
+            "status": "success",
+            "details": [{"id": "RES001", "transcript": "", "progress": 50}],
+        }
+
+        output = _run_command()
+
+        self.assertIn("Still processing: 1", output)
+        self.assertIn("Errors:           0", output)

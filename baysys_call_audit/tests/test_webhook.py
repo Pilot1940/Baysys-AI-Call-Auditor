@@ -51,6 +51,11 @@ SAMPLE_WEBHOOK_PAYLOAD = {
 }
 
 
+def _get_results_side_effect(resource_id):
+    """Return the SAMPLE_WEBHOOK_PAYLOAD wrapped in a details array, keyed by resource_id."""
+    return {"status": "success", "details": [{**SAMPLE_WEBHOOK_PAYLOAD, "id": resource_id}]}
+
+
 @override_settings(SPEECH_PROVIDER_TEMPLATE_ID="TPL-001")
 class ProviderWebhookViewTests(TestCase):
     def setUp(self):
@@ -59,7 +64,8 @@ class ProviderWebhookViewTests(TestCase):
 
     @patch("baysys_call_audit.compliance.load_compliance_rules", return_value={"provider_rules": []})
     @patch("baysys_call_audit.compliance.load_fatal_level_rules", return_value={})
-    def test_webhook_success(self, _fl, _cr):
+    @patch("baysys_call_audit.services.speech_provider.get_results", side_effect=_get_results_side_effect)
+    def test_webhook_success(self, _gr, _fl, _cr):
         _make_recording()
         resp = self.client.post(self.url, SAMPLE_WEBHOOK_PAYLOAD, format="json")
         self.assertEqual(resp.status_code, 200)
@@ -70,7 +76,8 @@ class ProviderWebhookViewTests(TestCase):
 
     @patch("baysys_call_audit.compliance.load_compliance_rules", return_value={"provider_rules": []})
     @patch("baysys_call_audit.compliance.load_fatal_level_rules", return_value={})
-    def test_webhook_creates_transcript(self, _fl, _cr):
+    @patch("baysys_call_audit.services.speech_provider.get_results", side_effect=_get_results_side_effect)
+    def test_webhook_creates_transcript(self, _gr, _fl, _cr):
         _make_recording()
         self.client.post(self.url, SAMPLE_WEBHOOK_PAYLOAD, format="json")
 
@@ -83,7 +90,8 @@ class ProviderWebhookViewTests(TestCase):
 
     @patch("baysys_call_audit.compliance.load_compliance_rules", return_value={"provider_rules": []})
     @patch("baysys_call_audit.compliance.load_fatal_level_rules", return_value={})
-    def test_webhook_creates_provider_score(self, _fl, _cr):
+    @patch("baysys_call_audit.services.speech_provider.get_results", side_effect=_get_results_side_effect)
+    def test_webhook_creates_provider_score(self, _gr, _fl, _cr):
         _make_recording()
         self.client.post(self.url, SAMPLE_WEBHOOK_PAYLOAD, format="json")
 
@@ -113,9 +121,12 @@ class ProviderWebhookViewTests(TestCase):
 
     @patch("baysys_call_audit.compliance.load_compliance_rules", return_value={"provider_rules": []})
     @patch("baysys_call_audit.compliance.load_fatal_level_rules", return_value={})
-    def test_webhook_restricted_keywords_creates_flag(self, _fl, _cr):
+    @patch("baysys_call_audit.services.speech_provider.get_results")
+    def test_webhook_restricted_keywords_creates_flag(self, mock_gr, _fl, _cr):
         _make_recording()
-        payload = {**SAMPLE_WEBHOOK_PAYLOAD, "detected_restricted_keyword": True, "restricted_keywords": ["threat"]}
+        flagged_record = {**SAMPLE_WEBHOOK_PAYLOAD, "detected_restricted_keyword": True, "restricted_keywords": ["threat"]}
+        mock_gr.return_value = {"status": "success", "details": [flagged_record]}
+        payload = {"id": "RES-100", "category_data": [], "subjective_data": []}
         self.client.post(self.url, payload, format="json")
 
         flags = ComplianceFlag.objects.filter(recording__provider_resource_id="RES-100")
@@ -123,7 +134,8 @@ class ProviderWebhookViewTests(TestCase):
 
     @patch("baysys_call_audit.compliance.load_compliance_rules", return_value={"provider_rules": []})
     @patch("baysys_call_audit.compliance.load_fatal_level_rules", return_value={})
-    def test_webhook_outside_hours_creates_flag(self, _fl, _cr):
+    @patch("baysys_call_audit.services.speech_provider.get_results", side_effect=_get_results_side_effect)
+    def test_webhook_outside_hours_creates_flag(self, _gr, _fl, _cr):
         """Outside-hours is now a metadata rule checked at ingestion, not webhook.
         Verify no outside_hours flag from webhook processing."""
         _make_recording(

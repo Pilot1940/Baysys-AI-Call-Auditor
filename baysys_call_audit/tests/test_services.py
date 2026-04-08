@@ -88,26 +88,31 @@ class SubmitPendingRecordingsTests(TestCase):
         self.assertEqual(result["submitted"], 3)
 
 
+_FULL_GET_RECORD = {
+    "id": "RES-200",
+    "transcript": "Hello world",
+    "detected_language": "en",
+    "total_call_duration": 60,
+    "audit_compliance_score": 2,
+    "max_compliance_score": 4,
+    "detected_restricted_keyword": False,
+    "restricted_keywords": [],
+    "insights": {
+        "category_data": [],
+        "subjective_data": [],
+    },
+}
+
+
 @override_settings(SPEECH_PROVIDER_TEMPLATE_ID="TPL-001")
 class ProcessProviderWebhookTests(TestCase):
     @patch("baysys_call_audit.compliance.load_compliance_rules", return_value={"provider_rules": []})
     @patch("baysys_call_audit.compliance.load_fatal_level_rules", return_value={})
-    def test_process_webhook_creates_all(self, _fl, _cr):
+    @patch("baysys_call_audit.services.speech_provider.get_results")
+    def test_process_webhook_creates_all(self, mock_get_results, _fl, _cr):
+        mock_get_results.return_value = {"status": "success", "details": [_FULL_GET_RECORD]}
         r = _make_recording(status="submitted", provider_resource_id="RES-200")
-        payload = {
-            "resource_insight_id": "RES-200",
-            "transcript": "Hello world",
-            "detected_language": "en",
-            "total_call_duration": 60,
-            "audit_compliance_score": 2,
-            "max_compliance_score": 4,
-            "detected_restricted_keyword": False,
-            "restricted_keywords": [],
-            "insights": {
-                "category_data": [],
-                "subjective_data": [],
-            },
-        }
+        payload = {"id": "RES-200", "category_data": [], "subjective_data": []}
         result = process_provider_webhook(payload)
         self.assertIsNotNone(result)
         self.assertEqual(result.status, "completed")
@@ -127,6 +132,41 @@ class ProcessProviderWebhookTests(TestCase):
         result = process_provider_webhook({"resource_insight_id": "RES-300"})
         self.assertIsNotNone(result)
         self.assertEqual(CallTranscript.objects.count(), 0)
+
+    @patch("baysys_call_audit.compliance.load_compliance_rules", return_value={"provider_rules": []})
+    @patch("baysys_call_audit.compliance.load_fatal_level_rules", return_value={})
+    @patch("baysys_call_audit.services.speech_provider.get_results")
+    def test_flat_webhook_triggers_get_results_and_processes_details(self, mock_get_results, _fl, _cr):
+        """Flat webhook payload {"id": ...} triggers get_results(); details[0] is used for processing."""
+        _make_recording(status="submitted", provider_resource_id="41040800")
+        full_record = {
+            **_FULL_GET_RECORD,
+            "id": "41040800",
+            "audit_template_parameters": [{"name": "Greeting", "score": 1}],
+        }
+        mock_get_results.return_value = {"status": "success", "details": [full_record]}
+
+        flat_payload = {"id": 41040800, "category_data": [], "subjective_data": []}
+        result = process_provider_webhook(flat_payload)
+
+        mock_get_results.assert_called_once_with("41040800")
+        self.assertIsNotNone(result)
+        self.assertEqual(result.status, "completed")
+
+    @patch("baysys_call_audit.compliance.load_compliance_rules", return_value={"provider_rules": []})
+    @patch("baysys_call_audit.compliance.load_fatal_level_rules", return_value={})
+    @patch("baysys_call_audit.services.speech_provider.get_results")
+    def test_audit_template_parameters_stored_on_provider_score(self, mock_get_results, _fl, _cr):
+        """audit_template_parameters from GET response is persisted on ProviderScore."""
+        r = _make_recording(status="submitted", provider_resource_id="RES-ATP")
+        atp = [{"name": "Introduction", "score": 1, "max_score": 1}]
+        full_record = {**_FULL_GET_RECORD, "id": "RES-ATP", "audit_template_parameters": atp}
+        mock_get_results.return_value = {"status": "success", "details": [full_record]}
+
+        process_provider_webhook({"id": "RES-ATP"})
+
+        score = ProviderScore.objects.get(recording=r)
+        self.assertEqual(score.audit_template_parameters, atp)
 
 
 class OwnLLMScoringTests(TestCase):
