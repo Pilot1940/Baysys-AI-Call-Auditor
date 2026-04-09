@@ -109,7 +109,9 @@ SELECT
     cl.customer_id,
     cl.customer_number,
     cl.recording_s3_path,
-    cl.call_start_time,
+    -- WORKAROUND: CRM stores call_start_time as CDT (UTC-5) instead of IST (UTC+5:30).
+    -- Offset = 10h30m. Remove this when CRM fixes TIME_ZONE in settings.py.
+    cl.call_start_time - INTERVAL '10 hours 30 minutes' AS call_start_time,
     cl.call_duration,
     cl.campaign_name,
     cl.loan_id
