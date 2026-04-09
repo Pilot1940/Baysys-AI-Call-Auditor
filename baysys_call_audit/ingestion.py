@@ -118,6 +118,7 @@ LEFT JOIN uvarcl_live.users u ON cl.agent_id = u.user_id
 WHERE cl.call_start_time::date = %s
   AND cl.recording_s3_path IS NOT NULL
   AND cl.call_duration > %s
+  AND cl.download_recording_status = 'success'
 ORDER BY cl.call_start_time
 """
 

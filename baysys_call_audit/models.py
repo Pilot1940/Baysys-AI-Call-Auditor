@@ -41,7 +41,6 @@ class CallRecording(models.Model):
         db_index=True,
         help_text="Submission priority tier: immediate > normal > off_peak",
     )
-    download_recording_status = models.CharField(max_length=50, null=True, blank=True)
     fatal_level = models.IntegerField(
         default=0,
         help_text="Computed severity 0-5 from provider boolean scores. 0 = not yet scored.",
