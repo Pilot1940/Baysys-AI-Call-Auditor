@@ -84,6 +84,7 @@ def submit_recording(
     resp = requests.post(url, json=payload, headers=_get_headers(), timeout=30)
 
     if resp.status_code != 200:
+        logger.error("GreyLabs 400 response body: %s", resp.text)
         exc = ProviderError(
             f"Submit failed: HTTP {resp.status_code}",
             status_code=resp.status_code,

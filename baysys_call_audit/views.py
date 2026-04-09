@@ -513,7 +513,9 @@ class SubmitRecordingsView(AuditPermissionMixin, APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
         try:
-            counts = submit_pending_recordings()
+            data = request.data or {}
+            batch_size = data.get("batch_size") or getattr(django_settings, "SUBMIT_BATCH_SIZE", 100)
+            counts = submit_pending_recordings(batch_size=batch_size)
             return Response({"submitted": counts["submitted"], "failed": counts["failed"]})
         except Exception as exc:
             logger.exception("submit_recordings endpoint error")
