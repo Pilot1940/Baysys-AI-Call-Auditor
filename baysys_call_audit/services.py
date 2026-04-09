@@ -54,7 +54,7 @@ def submit_pending_recordings(
     """
     if batch_size is None:
         batch_size = getattr(settings, "SUBMIT_BATCH_SIZE", 100)
-    qs = CallRecording.objects.filter(status="pending")
+    qs = CallRecording.objects.filter(status="pending", download_recording_status="success")
     if tiers:
         qs = qs.filter(submission_tier__in=tiers)
     pending = qs.order_by("created_at")[:batch_size]

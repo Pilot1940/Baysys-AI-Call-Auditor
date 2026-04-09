@@ -22,6 +22,7 @@ def _make_recording(**kwargs):
         "agent_name": "Test Agent",
         "recording_url": "https://s3.example.com/call.mp3",
         "recording_datetime": datetime(2026, 4, 1, 10, 0, tzinfo=tz.utc),
+        "download_recording_status": "success",
     }
     defaults.update(kwargs)
     return CallRecording.objects.create(**defaults)

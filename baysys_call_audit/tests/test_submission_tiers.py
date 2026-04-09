@@ -35,6 +35,7 @@ def _make_recording(**kwargs):
         "recording_datetime": datetime(2026, 4, 1, 10, 0, tzinfo=tz.utc),
         "status": "pending",
         "submission_tier": "normal",
+        "download_recording_status": "success",
     }
     defaults.update(kwargs)
     return CallRecording.objects.create(**defaults)
