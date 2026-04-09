@@ -3,7 +3,7 @@
 # Settings overrides: where a Django setting exists for the same param, it takes precedence.
 # content_hash is SHA-256 of this file excluding the content_hash line itself.
 # Recompute with: python3 -c "import hashlib; raw=open('config/compliance_rules.yaml').read(); lines=raw.splitlines(keepends=True); filtered=[l for l in lines if not l.strip().startswith('content_hash:')]; print(hashlib.sha256(''.join(filtered).encode()).hexdigest())"
-content_hash: b2f249782f71fe8cbb97f91f2ae460866ec517e194115b99ca9f71450dc4230b
+content_hash: 5f331a031047f8e64872b7ff1dfa6bc6d865280c55afbcfd86f1bdee6ba8f7ae
 
 metadata_rules:
   - id: M1
@@ -29,7 +29,7 @@ metadata_rules:
 
   - id: M3
     name: Call on gazette holiday
-    enabled: false
+    enabled: true
     check_type: gazette_holiday
     severity: high
     flag_type: rbi_coc_violation
