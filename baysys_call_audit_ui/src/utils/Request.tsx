@@ -1,6 +1,7 @@
 /** HTTP helper — wraps fetch with auth headers and error handling. */
 
-const BASE_URL = "/audit";
+const AUDIT_SECRET = (import.meta as unknown as { env: Record<string, string> }).env.VITE_AUDIT_SECRET ?? "dev-secret";
+export const BASE_URL = `/audit/${AUDIT_SECRET}`;
 
 interface RequestOptions {
   method?: string;
