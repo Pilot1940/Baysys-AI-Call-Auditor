@@ -1,9 +1,9 @@
 # BaySys Call Audit AI — Build Log
 
 **Project:** BaySys Call Audit AI
-**Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
+**Repo:** `Pilot1940/Baysys-AI-Call-Auditor` (backend) · `bsfg-finance/crm` branch `call-audit-frontend-embed` (UI)
 **Build start:** 2026-04-01
-**Last updated:** 2026-04-08 (Session 25 cont.)
+**Last updated:** 2026-04-19 (Session 26 — CRM UI redesign, wine theme + 3-tab IA)
 **Build method:** Claude Code (Opus 4.6)
 
 ---
@@ -31,6 +31,67 @@
 | **Session 25** | **Live production UAT: 12+ hotfixes, GreyLabs pipeline operational** | **2026-04-07** | — |
 | **Q** | **OwnLLM Scoring Backend (designed, not yet executed)** | **2026-04-07** | — |
 | **R** | **OwnLLM Score UI swap (designed, not yet executed)** | **2026-04-07** | — |
+| **Session 26** | **CRM UI redesign — wine palette, 3-tab IA, privilege-gated Ops, review fixes applied** | **2026-04-20** | — |
+
+---
+
+## Session 26 — CRM Call Audit UI Redesign (Collexa wine theme)
+
+**Date:** 2026-04-20
+**Scope:** Port the Collexa UI redesign from the standalone `Baysys-AI-Call-Auditor` reference into the production `crm` frontend on branch `call-audit-frontend-embed`. Merge with master's privilege-gating changes. Apply pc-code-review findings in the same branch. **Backend untouched.**
+
+### Repos & branches
+- `bsfg-finance/crm` · branch `call-audit-frontend-embed` · PR [#68](https://github.com/bsfg-finance/crm/pull/68)
+- Commits: `2c1cec7` (redesign) → `acf20e7` (merge origin/master) → `1309a75` (code-review fixes)
+
+### What shipped
+- **3-tab IA:** Recordings / Agents / Ops — wine brand palette (`#7d0552`), KPI strip (Compliance Score · Exceptions · Unreviewed Flags · Pipeline).
+- **Call Detail page:** 2-column layout with sticky score hero, wine top-border, transcript with amber-highlighted flag evidence, inline flag review round-trip, audio signed-URL with retry.
+- **Privilege gating** (layered): Ops tab hidden via `showOpsTab` prop, individual sync/submit/poll buttons disabled via `canWrite` prop, stale `tab==='ops'` state redirected to Recordings. Uses `Privilege.callAudit.edit()` (level ≥ 3).
+- **Agency filter** derived from live `summary.agent_summary[].agency_id` — no hardcoded list.
+- **Accessibility:** `role="dialog"`, `aria-modal="true"`, `aria-label` on drawer and close button; ESC closes the agent drawer; removed non-keyboard row-click in recordings table (users use the "View →" button).
+- **Error handling:** surfaced flag-review PATCH failures to the user instead of silent ignore.
+
+### CRM repo files created (9)
+- `src/pages/audit/components/AuditShell.tsx` — header + agency/period filters + tab strip (accepts `agencies` and `showOpsTab` props).
+- `src/pages/audit/components/primitives.tsx` — `KpiCard`, `StatusPill`, `FatalBadge`, `ScoreCell`, `FilterChip`.
+- `src/pages/audit/components/RecordingsTab.tsx` — filter chips (FATAL ≥3 / score <50 / critical / unreviewed), status/agent/date filters, paged table.
+- `src/pages/audit/components/AgentsTab.tsx` — sortable table, opens drawer on row click.
+- `src/pages/audit/components/AgentDrawer.tsx` — slide-in panel, Overview + Call History tabs.
+- `src/pages/audit/components/OpsTab.tsx` — pipeline status, dry-run toggle, sync/submit/poll action cards.
+- `src/pages/audit/components/ScoreTrendChart.tsx` — recharts LineChart with 85/70/55 reference lines (kept for future per-call-score backend endpoint).
+
+### CRM repo files modified
+- `src/pages/audit/AuditDashboardPage.tsx` — rewritten on top of `AuditShell`; derives agency options from summary; applies `Privilege.callAudit.edit()` gate + redirect guard.
+- `src/pages/audit/AuditCallDetailPage.tsx` — full 2-column rewrite.
+- `src/types/audit.ts` — added `OpsResult`, `SignedUrlResponse`, `ScoreBand`, `AgentSummaryRow` (adds `unreviewed_flags`, `agency_id`), `compliance_flag_count?` on `CallRecording`. Helpers: `scoreBand()`, `scoreBandLabel()`, `formatDuration()`, `formatDateTime()`.
+- `tailwind.config.js` — added `brand.wine`/`wine-dark`/`wine-light`; disabled Tailwind preflight (master) to avoid Bootstrap reset clash.
+
+### Code review (pc-code-review) findings — all applied in commit `1309a75`
+- 🟠 **H-1:** Removed the dead Score Trend chart in AgentDrawer (all-null data by construction). Replaced with plain "Recent Activity" summary until a backend endpoint returns per-call scores.
+- 🟠 **H-2:** Noted — no vitest runner in `crm/`. Deferred for a separate test-infra PR.
+- 🟡 **M-1:** Flag review PATCH failures now surface via `setRetryMsg` instead of silent ignore.
+- 🟡 **M-2:** AgentDrawer has ESC handler, `role="dialog"`, `aria-modal`, `aria-label`, and accessible close button.
+- 🟡 **M-3:** Removed non-keyboard `<tr onClick>` in RecordingsTab; "View →" button is the single interaction path.
+- 🟡 **M-4:** Removed spurious `eslint-disable react-hooks/exhaustive-deps` comments. Added `fetchSignedUrl` to effect deps in AuditCallDetailPage.
+- 🟡 **M-5:** `AuditShell` accepts `agencies: AgencyOption[]` prop; `AuditDashboardPage` derives options from `summary.agent_summary[].agency_id`.
+- 🔵 Minor: dropped unused `useNavigate` + `void navigate` hack; guarded `recordingId` against NaN/≤0; dropped unused `refreshKey` prop (parent `key=` forces remount).
+
+### Test gate
+- `npx tsc --noEmit` — 0 errors.
+- `npx eslint src/pages/audit src/types/audit.ts --max-warnings=0` — 0 errors, 0 warnings.
+- `npm run build` — succeeds (8.9s). Main chunk 2.88 MB / 785 kB gzip — pre-existing, not caused by this PR.
+- Backend untouched; standalone `Baysys-AI-Call-Auditor` test count unchanged at 320.
+
+### Key decisions
+1. **Tailwind over React-Bootstrap** for the redesign to match the Collexa standalone reference. The existing crm shell still uses React-Bootstrap — coexistence works because preflight is disabled, so Bootstrap's reset remains authoritative.
+2. **Privilege check is belt-and-braces** — tab hidden + button disabled + route-state redirect. Defence in depth against stale state or direct tab mutation.
+3. **Agency list lives with the dashboard data, not the shell.** `AuditShell` now has no knowledge of which agencies exist.
+4. **Score Trend deferred** rather than faked. The label on a zero-data chart is worse than its absence.
+5. **`crm_adapter.py` / `speech_provider.py` rules untouched.** This PR is frontend-only; the backend single-seam invariants are not affected.
+
+### Code review output
+Saved to `BaySysAI/DOCUMENTATION/Code-Reviews/code-review-crm-call-audit-ui-redesign-2026-04-19.md`.
 
 ---
 

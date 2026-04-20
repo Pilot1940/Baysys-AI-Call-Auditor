@@ -1,10 +1,11 @@
 # BaySys Call Audit AI — Code Repository Manifest
 
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
-**Last updated:** Session 25 cont. (2026-04-08 — GreyLabs webhook integration fix; 3 new model fields; migration 0005)
-**Test count:** 320 passing (standalone)
+**Last updated:** Session 26 (2026-04-20 — CRM UI redesign ported to production `crm` repo, branch `call-audit-frontend-embed`, PR #68)
+**Test count:** 320 passing (standalone) · backend unchanged in this session
 **Ruff findings:** 0 (standalone) / 58 (crm_apis — auto-fixable)
 **Open issues:** TBD (issues created after push)
+**Production UI lives in:** `bsfg-finance/crm` repo, branch `call-audit-frontend-embed`. The `baysys_call_audit_ui/` scaffold in this repo is reference-only.
 
 ---
 
@@ -172,7 +173,32 @@
 
 ---
 
-## `baysys_call_audit_ui/` — React scaffold
+## Production UI — `bsfg-finance/crm` repo · branch `call-audit-frontend-embed`
+
+Ported in Session 14 (Prompt N), redesigned in Session 26 (Collexa wine theme).
+Files live under `crm/src/pages/audit/` and `crm/src/types/audit.ts`.
+
+| File (in crm repo) | Purpose |
+|---|---|
+| `src/pages/audit/AuditDashboardPage.tsx` | Top-level dashboard. Fetches `DashboardSummary`, derives KPIs + agency options, applies `Privilege.callAudit.edit()` gate, renders `AuditShell` with tab content. |
+| `src/pages/audit/AuditCallDetailPage.tsx` | 2-column detail view — audio, transcript (flag-evidence highlighting), compliance flag review, score hero, breakdown, call metadata. Uses `AUDIT_API.RECORDING_DETAIL/SIGNED_URL/RETRY/FLAG_REVIEW`. |
+| `src/pages/audit/components/AuditShell.tsx` | Page chrome: wine header, agency+period filter bar, tab strip. Props: `activeTab`, `agency`, `agencies`, `period`, `showOpsTab`. |
+| `src/pages/audit/components/primitives.tsx` | `KpiCard` (wine/amber/red/slate accents), `StatusPill`, `FatalBadge`, `ScoreCell`, `FilterChip`. |
+| `src/pages/audit/components/RecordingsTab.tsx` | Exception triage: FATAL ≥3 / score <50 / critical-flags / unreviewed chips + status/agent/date filters. Paged `RecordingListResponse`. |
+| `src/pages/audit/components/AgentsTab.tsx` | Sortable table (agent / calls / avg_score / fatals). Opens `AgentDrawer` on row click. |
+| `src/pages/audit/components/AgentDrawer.tsx` | Slide-in panel with Overview + Call History tabs. `role="dialog"`, ESC-to-close, `aria-modal`. |
+| `src/pages/audit/components/OpsTab.tsx` | Pipeline status + dry-run toggle + sync/submit/poll action cards. `canWrite` prop disables buttons. |
+| `src/pages/audit/components/ScoreTrendChart.tsx` | Recharts LineChart with 85/70/55 band reference lines. Currently referenced for future per-call-score backend endpoint (not rendered in Session 26 — see H-1). |
+| `src/types/audit.ts` | TypeScript interfaces + helpers (`scoreBand`, `scoreBandLabel`, `formatDuration`, `formatDateTime`). |
+| `src/utils/auditAxios.ts` | Axios instance (baseURL = `${apiBase}/audit/${AUDIT_URL_SECRET}`, cookie + Bearer auth, 60s timeout). |
+| `src/utils/auditApi.ts` | `AUDIT_API` endpoint constants. |
+| `src/utils/PrivilegeList.tsx` | `Privilege.callAudit.edit()` returns true for level ≥ 3 (Manager/TL, Admin). Driver of Ops tab visibility. |
+
+**Brand palette** (from `tailwind.config.js` in crm): `brand.wine = #7d0552`, `brand.wine-dark = #5c0339`, `brand.wine-light = #f8f0f5`. Tailwind `preflight` is disabled to coexist with Bootstrap reset.
+
+---
+
+## `baysys_call_audit_ui/` — React scaffold (reference only; not deployed)
 
 | File | Purpose |
 |------|---------|
@@ -230,10 +256,11 @@
 
 ---
 
-## Code Reviews (NOT in git — in parent `BaySys-Voice/Documentation/Code-Reviews/`)
+## Code Reviews (NOT in git — in parent `BaySys-Voice/Documentation/Code-Reviews/` or `BaySysAI/DOCUMENTATION/Code-Reviews/`)
 
 | File | Purpose |
 |------|---------|
+| `code-review-crm-call-audit-ui-redesign-2026-04-19.md` | Session 26 — UI redesign in crm repo: 0 CRITICAL, 2 HIGH, 5 MEDIUM, 4 MINOR (all HIGH + MEDIUM fixes applied in commit `1309a75`) |
 | `code-review-call-auditor-session25-2026-04-07.md` | Session 25 deep review: 0 CRITICAL, 8 HIGH, 9 MEDIUM, 4 MINOR |
 | `code-review-call-auditor-deep-scan-2026-04-07.md` | Session 25 early scan |
 | `code-review-call-auditor-2026-04-07.md` | Session 14 review |

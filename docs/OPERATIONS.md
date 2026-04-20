@@ -78,12 +78,29 @@ python manage.py dbshell --settings=settings
 ```
 
 ### 4. Start React dev server (separate terminal)
+
+**Reference scaffold (this repo):**
 ```bash
 cd baysys_call_audit_ui/
 npm install
 npm run dev
 # Opens at http://localhost:5173
 ```
+
+**Production UI (the one users actually see) lives in the `crm` repo:**
+```bash
+cd ../../BaySys-CoreSystem/crm
+git checkout call-audit-frontend-embed
+npm install
+npm run dev
+# UI: http://localhost:5173/call-audit  (requires `Privilege.callAudit` ≥ 2 to view)
+```
+
+The standalone scaffold is reference-only — redesign and feature work happens on the `crm` branch (PRs to master). See `MANIFEST.md` §"Production UI" for the file map.
+
+### Ops tab access control
+
+The Ops tab (sync / submit / poll) is gated by `Privilege.callAudit.edit()` — level ≥ 3 (Admin, Manager/TL). Users below that level see only Recordings and Agents; the Ops tab button is not rendered. Direct `?tab=ops` URL manipulation is redirected to Recordings by a guard effect in `AuditDashboardPage.tsx`. Individual sync/submit/poll buttons are also `disabled` when the privilege is missing — defence in depth.
 
 ---
 
