@@ -3,7 +3,7 @@
 **Project:** BaySys Call Audit AI
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor` (backend) · `bsfg-finance/crm` branch `call-audit-frontend-embed` (UI)
 **Build start:** 2026-04-01
-**Last updated:** 2026-04-21 (Session 27 — Trainer-primitive adoption, compact filters, CallDrawer flyout)
+**Last updated:** 2026-04-21 (Session 28 — Agents/Recordings agency grouping, Active Only toggle, inline ID pill)
 **Build method:** Claude Code (Opus 4.6)
 
 ---
@@ -33,6 +33,41 @@
 | **R** | **OwnLLM Score UI swap (designed, not yet executed)** | **2026-04-07** | — |
 | **Session 26** | **CRM UI redesign — wine palette, 3-tab IA, privilege-gated Ops, review fixes applied** | **2026-04-20** | — |
 | **Session 27** | **Trainer Action Board primitives, compact column-header filters, CallDrawer flyout, customer_id search** | **2026-04-21** | crm #72, #73 merged, #74 open |
+| **Session 28** | **Agents/Recordings agency grouping, Active Only toggle, inline agent-ID pill** | **2026-04-21** | crm #75 merged |
+
+---
+
+## Session 28 — Agents/Recordings agency grouping, Active Only toggle, inline ID pill
+
+**Date:** 2026-04-21
+**Scope:** Third UI pass on the `crm` production frontend. Agent and Recording tables now group by agency with a subtle header row, AgentsTab gets an "Active Only" default-on toggle with an "N active · M total" counter, and the agent cell collapses to a single line with a small slate pill for the agent ID. Backend untouched.
+
+### Repos & branches
+- `bsfg-finance/crm` · base branch `master`
+- **PR #75** — `audit-ui/agency-grouping-and-active-toggle` → `master` — MERGED.
+
+### What shipped (UI)
+- **AgentsTab**
+  - Dropped the serial-number (#) column.
+  - New **Active Only** wine pill in the header, default ON. "Active" is a frontend heuristic of `calls > 0` — no `is_active` field exists on `AgentSummaryRow` and no backend change was made.
+  - **N active · M total** counter rendered alongside the toggle.
+  - Rows grouped by `agency_id` with a subtle `bg-slate-50` group-header row (alphabetical, "Unassigned" last). In-group sort preserved.
+  - Inline agent-ID pill: Agent cell collapses to a single line with a small slate pill carrying the ID.
+- **RecordingsTab**
+  - Rows grouped by `agency_id` with the same subtle header pattern.
+  - Same inline agent-ID pill on the Agent cell.
+
+### Backend
+No change. PR #75 relied entirely on the existing `agency_id` field already on `AgentSummaryRow` / recording payloads. The H-8 gap (filter query params not honoured server-side) is unchanged and still open — unrelated to this session.
+
+### Files touched (crm repo)
+- `src/pages/audit/components/AgentsTab.tsx` — Active Only pill, counter, agency grouping, inline ID pill, # column removed.
+- `src/pages/audit/components/RecordingsTab.tsx` — agency grouping, inline ID pill.
+
+### Docs
+- This `BUILD_LOG.md` entry.
+- `MANIFEST.md` — AgentsTab/RecordingsTab rows updated to note Session 28 features.
+- `docs/OPERATIONS.md` — no change.
 
 ---
 
