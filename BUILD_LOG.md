@@ -3,7 +3,7 @@
 **Project:** BaySys Call Audit AI
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor` (backend) · `bsfg-finance/crm` branch `call-audit-frontend-embed` (UI)
 **Build start:** 2026-04-01
-**Last updated:** 2026-04-19 (Session 26 — CRM UI redesign, wine theme + 3-tab IA)
+**Last updated:** 2026-04-21 (Session 27 — Trainer-primitive adoption, compact filters, CallDrawer flyout)
 **Build method:** Claude Code (Opus 4.6)
 
 ---
@@ -32,6 +32,56 @@
 | **Q** | **OwnLLM Scoring Backend (designed, not yet executed)** | **2026-04-07** | — |
 | **R** | **OwnLLM Score UI swap (designed, not yet executed)** | **2026-04-07** | — |
 | **Session 26** | **CRM UI redesign — wine palette, 3-tab IA, privilege-gated Ops, review fixes applied** | **2026-04-20** | — |
+| **Session 27** | **Trainer Action Board primitives, compact column-header filters, CallDrawer flyout, customer_id search** | **2026-04-21** | crm #72, #73 merged, #74 open |
+
+---
+
+## Session 27 — Trainer-primitive adoption, compact filters, CallDrawer flyout
+
+**Date:** 2026-04-21
+**Scope:** Second UI pass on the `crm` production frontend to align the Call Audit surface with the Voice Trainer Action Board vocabulary, tighten the recordings triage flow, and replace the full-page call detail route with a right-side flyout. Backend untouched. All work shipped via three PRs on the `crm` repo.
+
+### Repos & branches
+- `bsfg-finance/crm` · base branch `master`
+- **PR #72** — `call-audit-frontend-embed` → `master` — MERGED. Topbar realignment (`490e1b1`) + Agents-tab Trainer-pattern primitives (`ed9d310`).
+- **PR #73** — `audit-ui/compact-filters-and-density` → `master` — MERGED. Compact filter row + denser Ops/Agents layout (`d47af1d`), drop View column row-click nav (`9632ca1`), filter chips folded into column headers (`1fe37df`).
+- **PR #74** — `audit-ui/call-flyout-and-customer-search` → `master` — OPEN. Customer ID filter (`839671b`), Call Detail flyout drawer (`2ccebfe`).
+
+### What shipped (UI)
+- **Trainer Action Board vocabulary** adopted across AgentsTab and AgentDrawer — new shared primitives `BandStatusPill`, `LevelBadge`, `ScoreBar`, `TrendArrow` co-located in `src/pages/audit/components/primitives.tsx` alongside the earlier `KpiCard` / `StatusPill` / `FatalBadge` / `ScoreCell` / `FilterChip` set.
+- **Compact filter row inside column headers** (RecordingsTab): status, agent_id, customer_id, date-range, FATAL ≥3, critical, unreviewed, score <50% chips all live under the column they filter. Old top-of-page filter bar removed.
+- **View column removed** — the whole row is now clickable/keyboard-navigable.
+- **OpsTab 2×2 tile grid** — denser layout, tighter spacing, no behavioural change.
+- **CallDrawer flyout** — replaces the full-page `/call-audit/call/:id` route with a right-side drawer (`src/pages/audit/components/CallDrawer.tsx`) mounted from `App.tsx`. Consistent with AgentDrawer (ESC to close, `role="dialog"`, `aria-modal`). Full-page route still exists for deep linking but Recordings table now opens the drawer by default.
+- **Customer ID search** added as a column-header filter (frontend-only — see backend gap below).
+
+### Backend gap (flagged, not fixed in this session)
+The recording list backend (`RecordingListView`) does NOT yet honour these query params, which the new UI sends:
+- `customer_id`
+- `fatal_level_gte`
+- `score_lt`
+- `has_critical_flags`
+- `has_unreviewed_flags`
+
+This affects both the production backend (`crm_apis` branch `call-auditor`, `arc/baysys_call_audit/views.py`) and the standalone reference repo (`Baysys-AI-Call-Auditor/baysys_call_audit/views.py`). A separate task has been spawned to wire these filters through the serializer/view + add tests. Until that lands, the frontend chips will appear to do nothing server-side.
+
+### Branch hygiene
+All three session PRs cleanly branched off `master`, merged or are open cleanly, and no stray local commits remain. `call-audit-frontend-embed` was used as the staging branch for PR #72 only — subsequent UI work correctly used dedicated `audit-ui/*` topic branches.
+
+### Files touched (crm repo)
+- `src/pages/audit/components/primitives.tsx` — new Trainer-pattern primitives.
+- `src/pages/audit/components/AgentsTab.tsx` — adopt BandStatusPill / LevelBadge / ScoreBar / TrendArrow; denser layout.
+- `src/pages/audit/components/AgentDrawer.tsx` — same primitive set; layout tightening.
+- `src/pages/audit/components/RecordingsTab.tsx` — column-header filters, drop View column, customer_id filter.
+- `src/pages/audit/components/OpsTab.tsx` — 2×2 tile grid.
+- `src/pages/audit/components/CallDrawer.tsx` — new flyout component (replaces page route usage).
+- `src/pages/audit/components/callDetailParts.tsx` — shared detail fragments used by both the drawer and the legacy full-page route.
+- `src/App.tsx` — drawer mount.
+
+### Docs
+- This `BUILD_LOG.md` entry.
+- `MANIFEST.md` updated — new primitives + `CallDrawer.tsx` + `callDetailParts.tsx` listed under "Production UI — `bsfg-finance/crm` repo".
+- `docs/OPERATIONS.md` — no change required (no route contract change from an ops perspective; the `/call-audit/call/:id` route still exists for deep linking).
 
 ---
 

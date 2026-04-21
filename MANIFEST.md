@@ -1,7 +1,7 @@
 # BaySys Call Audit AI — Code Repository Manifest
 
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
-**Last updated:** Session 26 (2026-04-20 — CRM UI redesign ported to production `crm` repo, branch `call-audit-frontend-embed`, PR #68)
+**Last updated:** Session 27 (2026-04-21 — Trainer Action Board primitives, compact column-header filters, CallDrawer flyout; crm PRs #72, #73 merged, #74 open)
 **Test count:** 320 passing (standalone) · backend unchanged in this session
 **Ruff findings:** 0 (standalone) / 58 (crm_apis — auto-fixable)
 **Open issues:** TBD (issues created after push)
@@ -175,19 +175,21 @@
 
 ## Production UI — `bsfg-finance/crm` repo · branch `call-audit-frontend-embed`
 
-Ported in Session 14 (Prompt N), redesigned in Session 26 (Collexa wine theme).
+Ported in Session 14 (Prompt N), redesigned in Session 26 (Collexa wine theme), iterated in Session 27 (Trainer Action Board primitives + CallDrawer flyout).
 Files live under `crm/src/pages/audit/` and `crm/src/types/audit.ts`.
 
 | File (in crm repo) | Purpose |
 |---|---|
 | `src/pages/audit/AuditDashboardPage.tsx` | Top-level dashboard. Fetches `DashboardSummary`, derives KPIs + agency options, applies `Privilege.callAudit.edit()` gate, renders `AuditShell` with tab content. |
-| `src/pages/audit/AuditCallDetailPage.tsx` | 2-column detail view — audio, transcript (flag-evidence highlighting), compliance flag review, score hero, breakdown, call metadata. Uses `AUDIT_API.RECORDING_DETAIL/SIGNED_URL/RETRY/FLAG_REVIEW`. |
+| `src/pages/audit/AuditCallDetailPage.tsx` | Legacy full-page 2-column detail view (kept for deep linking). Session 27 added `CallDrawer` flyout that is now the default open-path from RecordingsTab. |
 | `src/pages/audit/components/AuditShell.tsx` | Page chrome: wine header, agency+period filter bar, tab strip. Props: `activeTab`, `agency`, `agencies`, `period`, `showOpsTab`. |
-| `src/pages/audit/components/primitives.tsx` | `KpiCard` (wine/amber/red/slate accents), `StatusPill`, `FatalBadge`, `ScoreCell`, `FilterChip`. |
-| `src/pages/audit/components/RecordingsTab.tsx` | Exception triage: FATAL ≥3 / score <50 / critical-flags / unreviewed chips + status/agent/date filters. Paged `RecordingListResponse`. |
-| `src/pages/audit/components/AgentsTab.tsx` | Sortable table (agent / calls / avg_score / fatals). Opens `AgentDrawer` on row click. |
-| `src/pages/audit/components/AgentDrawer.tsx` | Slide-in panel with Overview + Call History tabs. `role="dialog"`, ESC-to-close, `aria-modal`. |
-| `src/pages/audit/components/OpsTab.tsx` | Pipeline status + dry-run toggle + sync/submit/poll action cards. `canWrite` prop disables buttons. |
+| `src/pages/audit/components/primitives.tsx` | Session 26 set: `KpiCard` (wine/amber/red/slate accents), `StatusPill`, `FatalBadge`, `ScoreCell`, `FilterChip`. **Session 27 added** Trainer Action Board vocabulary: `BandStatusPill`, `LevelBadge`, `ScoreBar`, `TrendArrow`. |
+| `src/pages/audit/components/RecordingsTab.tsx` | Exception triage. **Session 27:** compact filter row lives inside column headers — status, agent_id, customer_id, date range, FATAL ≥3, critical, unreviewed, score <50%. View column removed; whole row clickable. |
+| `src/pages/audit/components/AgentsTab.tsx` | Sortable table (agent / calls / avg_score / fatals). Session 27 adopts Trainer primitives (BandStatusPill, LevelBadge, ScoreBar, TrendArrow) and denser layout. Opens `AgentDrawer` on row click. |
+| `src/pages/audit/components/AgentDrawer.tsx` | Slide-in panel with Overview + Call History tabs. Session 27 adopts the same Trainer primitive set. `role="dialog"`, ESC-to-close, `aria-modal`. |
+| `src/pages/audit/components/CallDrawer.tsx` | **Session 27** — right-side call-detail flyout that replaces the full-page route as the default open-path from RecordingsTab. Mounted from `App.tsx`. Consumes the shared fragments in `callDetailParts.tsx`. `role="dialog"`, ESC-to-close, `aria-modal`. |
+| `src/pages/audit/components/callDetailParts.tsx` | **Session 27** — shared detail sub-components (score hero, transcript with flag-evidence highlighting, flag review, metadata) consumed by both `CallDrawer` and the legacy `AuditCallDetailPage`. |
+| `src/pages/audit/components/OpsTab.tsx` | Pipeline status + dry-run toggle + sync/submit/poll action cards. Session 27 uses a 2×2 tile grid. `canWrite` prop disables buttons. |
 | `src/pages/audit/components/ScoreTrendChart.tsx` | Recharts LineChart with 85/70/55 band reference lines. Currently referenced for future per-call-score backend endpoint (not rendered in Session 26 — see H-1). |
 | `src/types/audit.ts` | TypeScript interfaces + helpers (`scoreBand`, `scoreBandLabel`, `formatDuration`, `formatDateTime`). |
 | `src/utils/auditAxios.ts` | Axios instance (baseURL = `${apiBase}/audit/${AUDIT_URL_SECRET}`, cookie + Bearer auth, 60s timeout). |
@@ -278,5 +280,6 @@ Files live under `crm/src/pages/audit/` and `crm/src/types/audit.ts`.
 | H-5 | HIGH | crm_apis `compliance.py` missing `_sync_content_hash()` | crm_apis mirror after Prompt Q |
 | H-6 | HIGH | crm_apis has 58 ruff errors from file mirror | `ruff check --fix` on crm_apis |
 | H-7 | HIGH | Timezone inconsistency: sync path explicit IST vs import path defaulting to UTC | `ingestion.py` |
+| H-8 | HIGH | `RecordingListView` does not honour `customer_id`, `fatal_level_gte`, `score_lt`, `has_critical_flags`, `has_unreviewed_flags` query params sent by the Session 27 UI filters (chips render but filter nothing server-side). Fix needed in both standalone `baysys_call_audit/views.py` and crm_apis `arc/baysys_call_audit/views.py`; separate task spawned 2026-04-21. | `views.py` + serializer + tests |
 | M-1 | MEDIUM | Batch size user input not validated in views | `views.py` |
 | M-2 | MEDIUM | `fetchall()` defeats batch_size memory protection | `ingestion.py` |
