@@ -1,7 +1,7 @@
 # BaySys Call Audit AI — Code Repository Manifest
 
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
-**Last updated:** Session 27 (2026-04-21 — Trainer Action Board primitives, compact column-header filters, CallDrawer flyout; crm PRs #72, #73 merged, #74 open)
+**Last updated:** Session 28 (2026-04-21 — Agents/Recordings agency grouping, Active Only toggle, inline agent-ID pill; crm PR #75 merged)
 **Test count:** 320 passing (standalone) · backend unchanged in this session
 **Ruff findings:** 0 (standalone) / 58 (crm_apis — auto-fixable)
 **Open issues:** TBD (issues created after push)
@@ -175,7 +175,7 @@
 
 ## Production UI — `bsfg-finance/crm` repo · branch `call-audit-frontend-embed`
 
-Ported in Session 14 (Prompt N), redesigned in Session 26 (Collexa wine theme), iterated in Session 27 (Trainer Action Board primitives + CallDrawer flyout).
+Ported in Session 14 (Prompt N), redesigned in Session 26 (Collexa wine theme), iterated in Session 27 (Trainer Action Board primitives + CallDrawer flyout), and Session 28 (agency grouping + Active Only toggle + inline ID pill).
 Files live under `crm/src/pages/audit/` and `crm/src/types/audit.ts`.
 
 | File (in crm repo) | Purpose |
@@ -184,8 +184,8 @@ Files live under `crm/src/pages/audit/` and `crm/src/types/audit.ts`.
 | `src/pages/audit/AuditCallDetailPage.tsx` | Legacy full-page 2-column detail view (kept for deep linking). Session 27 added `CallDrawer` flyout that is now the default open-path from RecordingsTab. |
 | `src/pages/audit/components/AuditShell.tsx` | Page chrome: wine header, agency+period filter bar, tab strip. Props: `activeTab`, `agency`, `agencies`, `period`, `showOpsTab`. |
 | `src/pages/audit/components/primitives.tsx` | Session 26 set: `KpiCard` (wine/amber/red/slate accents), `StatusPill`, `FatalBadge`, `ScoreCell`, `FilterChip`. **Session 27 added** Trainer Action Board vocabulary: `BandStatusPill`, `LevelBadge`, `ScoreBar`, `TrendArrow`. |
-| `src/pages/audit/components/RecordingsTab.tsx` | Exception triage. **Session 27:** compact filter row lives inside column headers — status, agent_id, customer_id, date range, FATAL ≥3, critical, unreviewed, score <50%. View column removed; whole row clickable. |
-| `src/pages/audit/components/AgentsTab.tsx` | Sortable table (agent / calls / avg_score / fatals). Session 27 adopts Trainer primitives (BandStatusPill, LevelBadge, ScoreBar, TrendArrow) and denser layout. Opens `AgentDrawer` on row click. |
+| `src/pages/audit/components/RecordingsTab.tsx` | Exception triage. Session 27: compact filter row lives inside column headers — status, agent_id, customer_id, date range, FATAL ≥3, critical, unreviewed, score <50%. View column removed; whole row clickable. **Session 28:** rows grouped by `agency_id` with subtle `bg-slate-50` header row; inline agent-ID pill (single-line Agent cell with small slate ID pill). |
+| `src/pages/audit/components/AgentsTab.tsx` | Sortable table (agent / calls / avg_score / fatals). Session 27 adopts Trainer primitives (BandStatusPill, LevelBadge, ScoreBar, TrendArrow) and denser layout. Opens `AgentDrawer` on row click. **Session 28:** # column dropped; "Active Only" wine pill in the header (default ON, `calls > 0` heuristic — no `is_active` field exists); "N active · M total" counter; rows grouped by `agency_id` (alphabetical, "Unassigned" last) with in-group sort preserved; inline agent-ID pill. |
 | `src/pages/audit/components/AgentDrawer.tsx` | Slide-in panel with Overview + Call History tabs. Session 27 adopts the same Trainer primitive set. `role="dialog"`, ESC-to-close, `aria-modal`. |
 | `src/pages/audit/components/CallDrawer.tsx` | **Session 27** — right-side call-detail flyout that replaces the full-page route as the default open-path from RecordingsTab. Mounted from `App.tsx`. Consumes the shared fragments in `callDetailParts.tsx`. `role="dialog"`, ESC-to-close, `aria-modal`. |
 | `src/pages/audit/components/callDetailParts.tsx` | **Session 27** — shared detail sub-components (score hero, transcript with flag-evidence highlighting, flag review, metadata) consumed by both `CallDrawer` and the legacy `AuditCallDetailPage`. |
