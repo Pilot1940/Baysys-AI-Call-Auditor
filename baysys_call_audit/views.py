@@ -145,8 +145,15 @@ class RecordingListView(AuditPermissionMixin, APIView):
         total = qs.count()
 
         serializer = CallRecordingListSerializer(qs[start:end], many=True)
+        results = list(serializer.data)
+        # Enrich with human-readable agency names via the CRM adapter (single batched lookup).
+        agency_ids = {row.get("agency_id") for row in results if row.get("agency_id")}
+        agency_name_map = crm_adapter.get_agency_name_map(agency_ids) if agency_ids else {}
+        for row in results:
+            aid = row.get("agency_id")
+            row["agency_name"] = agency_name_map.get(str(aid)) if aid else None
         return Response({
-            "results": serializer.data,
+            "results": results,
             "pagination": {
                 "page": page,
                 "page_size": page_size,
@@ -221,7 +228,7 @@ class DashboardSummaryView(AuditPermissionMixin, APIView):
 
         agent_summary = list(
             qs.filter(status="completed")
-            .values("agent_id", "agent_name")
+            .values("agent_id", "agent_name", "agency_id")
             .annotate(
                 calls=Count("pk"),
                 avg_score=Avg("provider_scores__score_percentage"),
@@ -229,6 +236,12 @@ class DashboardSummaryView(AuditPermissionMixin, APIView):
             )
             .order_by("-avg_score")[:20]
         )
+        # Enrich with human-readable agency names (one batched adapter lookup).
+        agency_ids = {row.get("agency_id") for row in agent_summary if row.get("agency_id")}
+        agency_name_map = crm_adapter.get_agency_name_map(agency_ids) if agency_ids else {}
+        for row in agent_summary:
+            aid = row.get("agency_id")
+            row["agency_name"] = agency_name_map.get(str(aid)) if aid else None
 
         data = {
             "total_recordings": total,

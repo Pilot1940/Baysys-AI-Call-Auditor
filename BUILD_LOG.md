@@ -873,3 +873,39 @@ Replaced `while True: fetchmany()` loop with a single `cursor.fetchall()` inside
 3. **`call_counts_cache` is optional** — defaults to None. CSV/Excel import callers pass nothing; behaviour unchanged.
 
 ### Test count: 271 passing, 0 ruff findings (commit: 55fd923)
+
+---
+
+## Session 29 — 2026-04-22: expose `agency_name` on list + summary APIs
+
+### Goal
+
+Frontend group headers in `AgentsTab` and `RecordingsTab` currently render raw `agency_id`
+(e.g. `"8"`). UI needed a readable name (e.g. `"Prolynk"`) without leaking CRM models
+outside `crm_adapter.py`.
+
+### Changes
+
+- `baysys_call_audit/crm_adapter.py` — new `get_agency_name_map(agency_ids) -> dict[str, str]`.
+  Mock returns a fixed `{"1": "BaySys Collections", "2": "Metro Recovery", "3": "National ARC"}`
+  map. Prod does one batched `Agency.objects.filter(agency_id__in=…).values(…)` query with
+  CRM import scoped inside the function body (`# noqa: PLC0415`). Unknown ids are absent
+  from the returned map — callers treat as "name unknown".
+- `baysys_call_audit/views.py` — `RecordingListView.get()` post-processes the serializer
+  output: collect distinct non-null `agency_id`s, single adapter call, inject
+  `agency_name` (nullable string) on each row. Same treatment in
+  `DashboardSummaryView.get()` — `agent_summary` aggregation now includes `agency_id`
+  and each row gets `agency_name` injected.
+- `baysys_call_audit/tests/test_views.py` — new `AgencyNameEnrichmentTests` class with
+  two tests covering both endpoints, including null and unknown-agency fallbacks. Uses
+  `force_authenticate(MockUser(role_id=1))` to bypass the agency-scoped RBAC filter so
+  multi-agency rows are visible.
+
+### Shape notes
+
+- `CallRecording.agency_id` is a raw `CharField` (no FK). The adapter normalises keys to
+  strings to keep the lookup side-agnostic.
+- `DashboardSummarySerializer.agent_summary` is declared as `ListField(child=DictField())`,
+  so the added `agency_name` key passes through with no serializer change.
+
+### Test count: 322 passing, 0 ruff findings

@@ -7,6 +7,7 @@ from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient, APIRequestFactory
 
+from baysys_call_audit.auth import MockUser
 from baysys_call_audit.models import (
     CallRecording,
     CallTranscript,
@@ -194,6 +195,44 @@ class DashboardSummaryExtendedTests(TestCase):
         self.assertEqual(len(summary), 2)
         # Highest avg_score first
         self.assertEqual(summary[0]["agent_id"], "A001")
+
+
+class AgencyNameEnrichmentTests(TestCase):
+    """agency_name injection on the recording list and agent summary endpoints."""
+
+    def setUp(self):
+        self.client = APIClient()
+        # Force an Admin (cross-agency) mock user so rows spanning multiple
+        # agency_ids are visible.
+        self.client.force_authenticate(user=MockUser(role_id=1))
+        self.list_url = reverse("baysys_call_audit:recording-list")
+        self.summary_url = reverse("baysys_call_audit:dashboard-summary")
+
+    def test_recording_list_includes_agency_name(self):
+        _make_recording(agency_id="1")
+        _make_recording(agent_id="A002", agency_id="2")
+        _make_recording(agent_id="A003", agency_id="999")  # unknown -> None
+        _make_recording(agent_id="A004", agency_id=None)   # null -> None
+        resp = self.client.get(self.list_url)
+        self.assertEqual(resp.status_code, 200)
+        by_agent = {r["agent_id"]: r for r in resp.data["results"]}
+        self.assertEqual(by_agent["A001"]["agency_name"], "BaySys Collections")
+        self.assertEqual(by_agent["A002"]["agency_name"], "Metro Recovery")
+        self.assertIsNone(by_agent["A003"]["agency_name"])
+        self.assertIsNone(by_agent["A004"]["agency_name"])
+
+    def test_agent_summary_includes_agency_name(self):
+        r1 = _make_recording(agent_id="A001", agent_name="Alice",
+                             agency_id="1", status="completed")
+        r2 = _make_recording(agent_id="A002", agent_name="Bob",
+                             agency_id="2", status="completed")
+        ProviderScore.objects.create(recording=r1, template_id="T1", score_percentage=90.0)
+        ProviderScore.objects.create(recording=r2, template_id="T1", score_percentage=60.0)
+        resp = self.client.get(self.summary_url)
+        self.assertEqual(resp.status_code, 200)
+        by_agent = {row["agent_id"]: row for row in resp.data["agent_summary"]}
+        self.assertEqual(by_agent["A001"]["agency_name"], "BaySys Collections")
+        self.assertEqual(by_agent["A002"]["agency_name"], "Metro Recovery")
 
 
 class RecordingSignedUrlViewTests(TestCase):
