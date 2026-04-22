@@ -3,7 +3,7 @@
 **Project:** BaySys Call Audit AI
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor` (backend) · `bsfg-finance/crm` branch `call-audit-frontend-embed` (UI)
 **Build start:** 2026-04-01
-**Last updated:** 2026-04-21 (Session 28 — Agents/Recordings agency grouping, Active Only toggle, inline ID pill)
+**Last updated:** 2026-04-22 (Session 30 — collapsible agency accordion, default collapsed)
 **Build method:** Claude Code (Opus 4.6)
 
 ---
@@ -34,6 +34,7 @@
 | **Session 26** | **CRM UI redesign — wine palette, 3-tab IA, privilege-gated Ops, review fixes applied** | **2026-04-20** | — |
 | **Session 27** | **Trainer Action Board primitives, compact column-header filters, CallDrawer flyout, customer_id search** | **2026-04-21** | crm #72, #73 merged, #74 open |
 | **Session 28** | **Agents/Recordings agency grouping, Active Only toggle, inline agent-ID pill** | **2026-04-21** | crm #75 merged |
+| **Session 30** | **Collapsible agency accordion (default collapsed) on both tabs** | **2026-04-22** | crm #77 open |
 
 ---
 
@@ -908,3 +909,32 @@ Replaced `while True: fetchmany()` loop with a single `cursor.fetchall()` inside
 3. **`call_counts_cache` is optional** — defaults to None. CSV/Excel import callers pass nothing; behaviour unchanged.
 
 ### Test count: 271 passing, 0 ruff findings (commit: 55fd923)
+
+---
+
+## Session 30 — Collapsible agency accordion (default collapsed)
+
+**Date:** 2026-04-22
+**Scope:** UI-only. The agency group headers on both Agents and Recordings tabs become clickable accordions — all collapsed by default so the initial view is just a list of agencies with counts. Backend untouched.
+
+### Repos & branches
+- `bsfg-finance/crm` · base `master` · branch `audit-ui/accordion-agency-groups`
+- **PR #77** — open, not merged.
+
+### What shipped
+- `useState<Set<string>>` per tab (AgentsTab, RecordingsTab). Empty set = everything collapsed.
+- Agency header row: `cursor-pointer`, `hover:bg-slate-100`, `role="button"`, `aria-expanded`, `tabIndex={0}`, keyboard `Enter`/`Space` toggle. Chevron `›` collapsed / `⌄` expanded. Count always visible.
+- Data rows are a render gate on `expanded.has(group.key)`. Grouping and sort logic unchanged.
+- Unassigned sentinel unified to `'__unassigned__'` (was `'—'`) so it participates in the expand-all set.
+- "Expand all" / "Collapse all" text button next to the existing Active Only / Score <50% controls. Flips between empty set and set-of-all-group-ids.
+
+### Files touched
+- `src/pages/audit/components/AgentsTab.tsx`
+- `src/pages/audit/components/RecordingsTab.tsx` (grouping logic hoisted out of the tbody IIFE so the top-bar toggle can see the group list)
+
+### Verification
+- `npx tsc --noEmit` clean.
+- `npx eslint src/pages/audit/ --max-warnings=50` — 0 errors; only the 2 pre-existing react-refresh warnings in `callDetailParts.tsx`.
+
+### Nothing else changed
+No dependency added, no backend touched, no API change. Filter chips, sort keys, row onClick → drawer, inline ID pill, pagination all preserved.
