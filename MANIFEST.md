@@ -1,8 +1,8 @@
 # BaySys Call Audit AI — Code Repository Manifest
 
 **Repo:** `Pilot1940/Baysys-AI-Call-Auditor`
-**Last updated:** Session 28 (2026-04-21 — Agents/Recordings agency grouping, Active Only toggle, inline agent-ID pill; crm PR #75 merged)
-**Test count:** 320 passing (standalone) · backend unchanged in this session
+**Last updated:** Session 29 (2026-04-22 — expose `agency_name` on recording list + agent summary responses for UI group headers). Session 28 (2026-04-21) was frontend-only: Agents/Recordings agency grouping, Active Only toggle, inline agent-ID pill (crm PR #75).
+**Test count:** 322 passing (standalone) · +2 tests for agency-name enrichment
 **Ruff findings:** 0 (standalone) / 58 (crm_apis — auto-fixable)
 **Open issues:** TBD (issues created after push)
 **Production UI lives in:** `bsfg-finance/crm` repo, branch `call-audit-frontend-embed`. The `baysys_call_audit_ui/` scaffold in this repo is reference-only.
@@ -129,7 +129,7 @@
 | `apps.py` | AppConfig | name=`baysys_call_audit`, verbose_name=`BaySys Call Audit AI` |
 | `admin.py` | Django admin registrations | All 5 models registered with list_display, filters, search |
 | `auth.py` | Authentication + RBAC | `MockUser`, `MockCrmAuth`, `get_auth_backend()`, `AuditPermissionMixin` |
-| `crm_adapter.py` | CRM mock/prod seam | `get_auth_backend_name()`, `get_user_portfolio()`, `get_team_users()`, `get_user_agency_id()`, `get_agency_list()`, `get_user_names()`, `get_signed_url()` |
+| `crm_adapter.py` | CRM mock/prod seam | `get_auth_backend_name()`, `get_user_portfolio()`, `get_team_users()`, `get_user_agency_id()`, `get_agency_list()`, `get_agency_name_map()`, `get_user_names()`, `get_signed_url()` |
 | `speech_provider.py` | Provider adapter | `submit_recording()`, `get_results()`, `delete_resource()`, `ask_question()`, `submit_transcript()`, `update_metadata()`, `ProviderError`. Session 25: `data=` → `json=` payload fix, `details[0]` unwrap from GreyLabs response, `customer_id` in submit payload. |
 | `compliance.py` | Config-driven compliance engine | `check_metadata_compliance(recording, call_counts_cache=None)` — cache dict enables O(1) max_calls check (sync path); None falls back to DB query (webhook path). `check_provider_compliance()`, `compute_fatal_level()`, `load_compliance_rules()`, `load_fatal_level_rules()`, `load_gazette_holidays()`, `_sync_content_hash()` (standalone only — auto-updates YAML content hash with warning). All time/date checks use IST via `_IST = ZoneInfo("Asia/Kolkata")`. `lru_cache` on YAML loaders — requires restart to pick up config changes. |
 | `ingestion.py` | Shared ingestion logic | `create_recording_from_row(row, existing_urls=None, call_counts_cache=None)` — `existing_urls` set: O(1) dedup; `call_counts_cache` dict: O(1) max_calls check. Both default to None (CSV/webhook paths use DB fallback). `run_sync_for_date()` — pre-fetches existing URLs (one query) and call counts dict (one annotated query) before loop; uses `fetchall()` to drain cursor before ORM writes (pgbouncer transaction-mode safe); `bulk_create()` for batch inserts (was N individual ORM creates). `validate_row()`, `parse_datetime_flexible()`, `normalize_column_name()`, `_determine_submission_tier()`, `_load_submission_priority()`. SYNC_QUERY filters on `call_start_time`; duration from `SYNC_MIN_CALL_DURATION` (default 20s). Session 25: IST timezone fix in `run_sync_for_date()`. Session 25 cont.: IST fix also applied to `create_recording_from_row()` — `make_aware()` now explicitly uses `ZoneInfo("Asia/Kolkata")` on both code paths. |

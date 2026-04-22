@@ -110,6 +110,47 @@ def get_signed_url(s3_path: str) -> str:
     return s3_download(s3_path)
 
 
+def get_agency_name_map(agency_ids) -> dict[str, str]:
+    """
+    Map agency_ids -> agency_name. Accepts any iterable of agency_ids.
+    Keys in the returned dict are always stringified agency_ids so callers can
+    look up regardless of how the ID is stored (CallRecording.agency_id is CharField).
+
+    Mock: returns a fixed fixture covering the dev agency IDs used elsewhere.
+    Prod: a single Agency.objects.filter(id__in=...) query.
+    Unknown agency_ids are simply absent from the returned map — callers should
+    treat a missing key as "name unknown".
+    """
+    ids = {str(a) for a in agency_ids if a is not None and str(a).strip() != ""}
+    if not ids:
+        return {}
+
+    if get_auth_backend_name() == "mock":
+        mock_map = {
+            "1": "BaySys Collections",
+            "2": "Metro Recovery",
+            "3": "National ARC",
+        }
+        return {aid: mock_map[aid] for aid in ids if aid in mock_map}
+
+    from arc.crm.models.agency_model import Agency  # noqa: PLC0415
+    # Agency ids in CRM are integers; coerce defensively and skip non-numeric.
+    numeric_ids: list[int] = []
+    for aid in ids:
+        try:
+            numeric_ids.append(int(aid))
+        except (TypeError, ValueError):
+            continue
+    if not numeric_ids:
+        return {}
+    return {
+        str(row["agency_id"]): row["agency_name"]
+        for row in Agency.objects.filter(agency_id__in=numeric_ids).values(
+            "agency_id", "agency_name",
+        )
+    }
+
+
 def get_user_names(user_ids: list[int]) -> dict[int, str]:
     """
     Map user_ids -> display name ('First Last').
