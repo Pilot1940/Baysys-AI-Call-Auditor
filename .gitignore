@@ -31,5 +31,8 @@ db.sqlite3
 *.log
 staticfiles/
 
-# Documentation binaries
+# Documentation binaries (keep markdown code reviews tracked)
 Documentation/
+!Documentation/Code-Reviews/
+!Documentation/Code-Reviews/**
+.claude/
